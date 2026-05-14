@@ -41,8 +41,6 @@ def _fit_contours(
     for contour in contours:
         if len(contour) < min_points:
             continue
-        if min_area > 0.0 and cv2.contourArea(contour) < min_area:
-            continue
         try:
             (cx, cy), (w, h), angle = fit_fn(contour)
         except cv2.error:
@@ -52,7 +50,12 @@ def _fit_contours(
         axis1, axis2 = w / 2, h / 2
         if not (min_axis <= min(axis1, axis2) and max(axis1, axis2) <= max_axis):
             continue
-        if min_circularity > 0.0 and min(axis1, axis2) / max(axis1, axis2) < min_circularity:
+        if min_area > 0.0 and np.pi * axis1 * axis2 < min_area:
+            continue
+        if (
+            min_circularity > 0.0
+            and min(axis1, axis2) / max(axis1, axis2) < min_circularity
+        ):
             continue
         ellipses.append(
             Ellipse(cx=cx, cy=cy, major_axis=axis1, minor_axis=axis2, angle=angle)
@@ -71,9 +74,15 @@ def detect_ellipses(
 ) -> list[Ellipse]:
     """Detect ellipses in a preprocessed (binary/edge) image."""
     contours, _ = cv2.findContours(preprocessed, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
-    return _fit_contours(contours, method, min_points, min_axis, max_axis, min_area, min_circularity)
+    return _fit_contours(
+        contours, method, min_points, min_axis, max_axis, min_area, min_circularity
+    )
 
 
+# TODO: how to manage a single mask for every coin?
+# overlapping?
+# - watershed
+# - distance between ellipses centers?
 def ellipses_mask(image: np.ndarray, ellipses: list[Ellipse]) -> np.ndarray:
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     for e in ellipses:
