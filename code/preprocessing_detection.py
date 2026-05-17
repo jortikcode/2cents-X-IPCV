@@ -33,9 +33,9 @@ def preprocess_gray(
     image: np.ndarray,
     median_ksize: int = 3,
     use_nlm: bool = True,
-    nlm_h: float = 5.0,
-    gaussian_ksize: int = 0,  # 0 = skip gaussian
-    normalize: str = "percentile",  # "percentile" | "clahe" | "none"
+    nlm_h: float = 45.0,
+    gaussian_ksize: int = 11,
+    normalize: str = "clahe",  # "percentile" | "clahe" | "none"
 ) -> np.ndarray:
     """Denoise + normalize only — no Canny. Use as input to HoughCircles."""
     # gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
@@ -66,9 +66,9 @@ def preprocess(
     image: np.ndarray,
     median_ksize: int = 3,
     use_nlm: bool = True,
-    nlm_h: float = 5.0,
-    gaussian_ksize: int = 0,  # 0 = skip gaussian
-    normalize: str = "percentile",  # "percentile" | "clahe" | "none"
+    nlm_h: float = 45.0,
+    gaussian_ksize: int = 11,
+    normalize: str = "clahe",  # "percentile" | "clahe" | "none"
     canny_sigma: float = 0.33,  # used only when canny_t1/t2 are None
     canny_t1: float | None = None,  # manual lower threshold; None = auto
     canny_t2: float | None = None,  # manual upper threshold; None = auto
