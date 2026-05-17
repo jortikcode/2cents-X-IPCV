@@ -30,6 +30,7 @@ def _fit_contours(
     max_axis: float,
     min_area: float = 0.0,
     min_circularity: float = 0.0,
+    max_tilt_deg: float = 90.0,
 ) -> list[Ellipse]:
     _cv2_fit = {
         "fitEllipse": cv2.fitEllipse,
@@ -57,6 +58,12 @@ def _fit_contours(
             and min(axis1, axis2) / max(axis1, axis2) < min_circularity
         ):
             continue
+        # fitEllipse returns angle of w-axis, but w < h is possible.
+        # If w < h, the actual major axis is perpendicular → shift by 90°.
+        major_angle = angle if axis1 >= axis2 else (angle + 90.0) % 180.0
+        tilt = min(major_angle, 180.0 - major_angle)
+        if tilt > max_tilt_deg:
+            continue
         ellipses.append(
             Ellipse(cx=cx, cy=cy, major_axis=axis1, minor_axis=axis2, angle=angle)
         )
@@ -71,18 +78,22 @@ def detect_ellipses(
     max_axis: float = 500.0,
     min_area: float = 0.0,
     min_circularity: float = 0.0,
+    max_tilt_deg: float = 90.0,  # 90 = no filter; lower = stricter horizontal constraint
 ) -> list[Ellipse]:
     """Detect ellipses in a preprocessed (binary/edge) image."""
     contours, _ = cv2.findContours(preprocessed, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
     return _fit_contours(
-        contours, method, min_points, min_axis, max_axis, min_area, min_circularity
+        contours,
+        method,
+        min_points,
+        min_axis,
+        max_axis,
+        min_area,
+        min_circularity,
+        max_tilt_deg,
     )
 
 
-# TODO: how to manage a single mask for every coin?
-# overlapping?
-# - watershed
-# - distance between ellipses centers?
 def ellipses_mask(image: np.ndarray, ellipses: list[Ellipse]) -> np.ndarray:
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     for e in ellipses:
