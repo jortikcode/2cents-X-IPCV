@@ -1,3 +1,5 @@
+"""Preprocessing pipeline for coin detection: denoising, normalization, and edge extraction."""
+
 import numpy as np
 import cv2
 
@@ -5,6 +7,7 @@ import cv2
 def _percentile_stretch(
     gray: np.ndarray, low: float = 2.0, high: float = 98.0
 ) -> np.ndarray:
+    """Stretch intensity range to [0, 255] clipping at given percentiles."""
     p_low, p_high = np.percentile(gray, (low, high))
     if p_high == p_low:
         return gray
@@ -75,6 +78,7 @@ def preprocess(
     morph_open_ksize: int = 0,  # 0 = skip
     morph_close_ksize: int = 0,  # 0 = skip
 ) -> np.ndarray:
+    """Full preprocessing pipeline: denoise + normalize + Canny edges. Returns binary edge map."""
     gray = preprocess_gray(
         image, median_ksize, use_nlm, nlm_h, gaussian_ksize, normalize
     )

@@ -1,6 +1,6 @@
-import numpy as np
+"""Ellipse detection via contour fitting with axis, area, circularity, and tilt filters."""
 
-# import matplotlib.pyplot as plt
+import numpy as np
 import cv2
 from dataclasses import dataclass
 from enum import Enum
@@ -32,6 +32,7 @@ def _fit_contours(
     min_circularity: float = 0.0,
     max_tilt_deg: float = 90.0,
 ) -> list[Ellipse]:
+    """Fit ellipses to contours and filter by axis size, area, circularity, and tilt."""
     _cv2_fit = {
         "fitEllipse": cv2.fitEllipse,
         "fitEllipseAMS": cv2.fitEllipseAMS,
@@ -95,6 +96,7 @@ def detect_ellipses(
 
 
 def ellipses_mask(image: np.ndarray, ellipses: list[Ellipse]) -> np.ndarray:
+    """Return a single binary mask with all ellipses merged (union)."""
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     for e in ellipses:
         cv2.ellipse(
@@ -111,6 +113,7 @@ def ellipses_mask(image: np.ndarray, ellipses: list[Ellipse]) -> np.ndarray:
 
 
 def draw_ellipses(image: np.ndarray, ellipses: list[Ellipse]) -> np.ndarray:
+    """Return a copy of image with detected ellipses drawn (green outline)."""
     out = image.copy()
     for e in ellipses:
         cv2.ellipse(

@@ -1,3 +1,5 @@
+"""Circle detection via Hough Transform with per-coin mask generation."""
+
 import numpy as np
 import cv2
 from dataclasses import dataclass
@@ -46,6 +48,7 @@ def detect_circles(
 
 
 def circles_mask(image: np.ndarray, circles: list[Circle]) -> np.ndarray:
+    """Return a single binary mask with all circles merged (union)."""
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     for c in circles:
         cv2.circle(mask, (int(c.cx), int(c.cy)), int(c.radius), 255, thickness=-1)
@@ -107,6 +110,7 @@ def per_coin_masks(
 
 
 def draw_circles(image: np.ndarray, circles: list[Circle]) -> np.ndarray:
+    """Return a copy of image with detected circles drawn (green outline, red center)."""
     out = image.copy()
     for c in circles:
         cv2.circle(out, (int(c.cx), int(c.cy)), int(c.radius), (0, 255, 0), thickness=2)
