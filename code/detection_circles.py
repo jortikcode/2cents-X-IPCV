@@ -47,6 +47,65 @@ def detect_circles(
     return [Circle(cx=float(cx), cy=float(cy), radius=float(r)) for cx, cy, r in raw[0]]
 
 
+def compute_gradients(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Gradient magnitude and angle (radians) via Sobel."""
+    gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    mag   = np.sqrt(gx ** 2 + gy ** 2)
+    angle = np.arctan2(gy, gx)
+    return mag, angle
+
+
+def edge_support_score(
+    cx: float,
+    cy: float,
+    radius: float,
+    mag: np.ndarray,
+    angle: np.ndarray,
+    n_samples: int = 72,
+) -> float:
+    """Score in [0, 1]: alignment of circle circumference with image edges.
+
+    Samples n_samples points on the circumference, checks that gradient
+    direction is approximately radial at each point. Weighted by magnitude
+    so weak-gradient points don't vote.
+    """
+    h, w = mag.shape
+    thetas = np.linspace(0, 2 * np.pi, n_samples, endpoint=False)
+    px = cx + radius * np.cos(thetas)
+    py = cy + radius * np.sin(thetas)
+
+    px_i = np.clip(np.round(px).astype(int), 0, w - 1)
+    py_i = np.clip(np.round(py).astype(int), 0, h - 1)
+
+    mags      = mag[py_i, px_i]
+    angles    = angle[py_i, px_i]
+    radial    = np.arctan2(py - cy, px - cx)
+    diff      = np.abs(angles - radial) % np.pi
+    alignment = np.cos(diff) ** 2  # 1 = radial, 0 = tangential
+
+    total_mag = mags.sum()
+    if total_mag < 1e-8:
+        return 0.0
+    return float((alignment * mags).sum() / total_mag)
+
+
+def filter_by_edge_support(
+    preprocessed: np.ndarray,
+    circles: list[Circle],
+    min_score: float = 0.85,
+    n_samples: int = 72,
+) -> tuple[list[Circle], list[Circle], list[float]]:
+    """Filter circles by radial edge support. Return (kept, rejected, scores)."""
+    if not circles:
+        return [], [], []
+    mag, angle = compute_gradients(preprocessed)
+    scores   = [edge_support_score(c.cx, c.cy, c.radius, mag, angle, n_samples) for c in circles]
+    kept     = [c for c, s in zip(circles, scores) if s >= min_score]
+    rejected = [c for c, s in zip(circles, scores) if s <  min_score]
+    return kept, rejected, scores
+
+
 def circles_mask(image: np.ndarray, circles: list[Circle]) -> np.ndarray:
     """Return a single binary mask with all circles merged (union)."""
     mask = np.zeros(image.shape[:2], dtype=np.uint8)

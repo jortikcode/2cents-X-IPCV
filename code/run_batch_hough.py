@@ -9,7 +9,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "code"))
 from preprocessing_detection import preprocess_gray
-from detection_circles import detect_circles, draw_circles, per_coin_masks
+from detection_circles import detect_circles, draw_circles, per_coin_masks, filter_by_edge_support
 
 PARAMS = dict(
     normalize="clahe",
@@ -23,6 +23,7 @@ PARAMS = dict(
     min_radius=50,
     max_radius=130,
     overlap="exclude",  # "include" | "exclude" | "nearest"
+    min_score=0.85,
 )
 
 PALETTE = [
@@ -71,31 +72,36 @@ for img_path in images:
         max_radius=PARAMS["max_radius"],
     )
 
-    radii = [c.radius for c in circles]
+    kept, rejected, scores = filter_by_edge_support(gray, circles, min_score=PARAMS["min_score"])
+    kept_scores = [s for s in scores if s >= PARAMS["min_score"]]
+
+    radii = [c.radius for c in kept]
     entry = {
         **PARAMS,
         "image": img_path.name,
         "n_circles": len(circles),
+        "n_kept": len(kept),
+        "n_rejected": len(rejected),
         "mean_radius": round(float(np.mean(radii)), 1) if radii else 0.0,
         "std_radius": round(float(np.std(radii)), 1) if radii else 0.0,
         "circles": [
-            {"cx": round(c.cx, 1), "cy": round(c.cy, 1), "r": round(c.radius, 1)}
-            for c in circles
+            {"cx": round(c.cx, 1), "cy": round(c.cy, 1), "r": round(c.radius, 1), "score": round(s, 3)}
+            for c, s in zip(kept, kept_scores)
         ],
         "timestamp": datetime.now().isoformat(),
     }
     with open(LOG, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
-    annotated = draw_circles(img, circles)
+    annotated = draw_circles(img, kept)
     cv2.imwrite(str(OUT_DIR / img_path.name), annotated)
 
     colored_mask = np.zeros_like(img)
-    for i, mask in enumerate(per_coin_masks(img, circles, overlap=PARAMS["overlap"])):
+    for i, mask in enumerate(per_coin_masks(img, kept, overlap=PARAMS["overlap"])):
         color = PALETTE[i % len(PALETTE)]
         colored_mask[mask > 0] = color
     cv2.imwrite(str(MASK_DIR / img_path.name), colored_mask)
 
-    print(f"{img_path.name}: {len(circles)} circles")
+    print(f"{img_path.name}: {len(circles)} detected → {len(kept)} kept, {len(rejected)} rejected")
 
 print(f"\nDone. {len(images)} images → {LOG}")
