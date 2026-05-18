@@ -4,3 +4,4 @@ coin_dataset/*
 GEMINI.md
 uv.lock
 __MACOSX/
+.vscode
