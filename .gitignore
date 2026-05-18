@@ -4,4 +4,5 @@ coin_dataset/*
 GEMINI.md
 uv.lock
 __MACOSX/
+__pycache__
 .vscode
