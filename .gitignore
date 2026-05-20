@@ -6,3 +6,5 @@ GEMINI.md
 CLAUDE.md
 uv.lock
 __MACOSX/
+__pycache__
+.vscode
