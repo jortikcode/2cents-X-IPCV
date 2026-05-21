@@ -43,7 +43,6 @@ def detect_circles(
     )
     if raw is None:
         return []
-    # TODO: filtrare i falsi positivi (es. soglia su mean L-channel, edge support, varianza interna)
     return [Circle(cx=float(cx), cy=float(cy), radius=float(r)) for cx, cy, r in raw[0]]
 
 
@@ -51,7 +50,7 @@ def compute_gradients(gray: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Gradient magnitude and angle (radians) via Sobel."""
     gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
     gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-    mag   = np.sqrt(gx ** 2 + gy ** 2)
+    mag = np.sqrt(gx**2 + gy**2)
     angle = np.arctan2(gy, gx)
     return mag, angle
 
@@ -78,10 +77,10 @@ def edge_support_score(
     px_i = np.clip(np.round(px).astype(int), 0, w - 1)
     py_i = np.clip(np.round(py).astype(int), 0, h - 1)
 
-    mags      = mag[py_i, px_i]
-    angles    = angle[py_i, px_i]
-    radial    = np.arctan2(py - cy, px - cx)
-    diff      = np.abs(angles - radial) % np.pi
+    mags = mag[py_i, px_i]
+    angles = angle[py_i, px_i]
+    radial = np.arctan2(py - cy, px - cx)
+    diff = np.abs(angles - radial) % np.pi
     alignment = np.cos(diff) ** 2  # 1 = radial, 0 = tangential
 
     total_mag = mags.sum()
@@ -100,17 +99,27 @@ def filter_by_edge_support(
     if not circles:
         return [], [], []
     mag, angle = compute_gradients(preprocessed)
-    scores   = [edge_support_score(c.cx, c.cy, c.radius, mag, angle, n_samples) for c in circles]
-    kept     = [c for c, s in zip(circles, scores) if s >= min_score]
-    rejected = [c for c, s in zip(circles, scores) if s <  min_score]
+    scores = [
+        edge_support_score(c.cx, c.cy, c.radius, mag, angle, n_samples) for c in circles
+    ]
+    kept = [c for c, s in zip(circles, scores) if s >= min_score]
+    rejected = [c for c, s in zip(circles, scores) if s < min_score]
     return kept, rejected, scores
 
 
-def circles_mask(image: np.ndarray, circles: list[Circle]) -> np.ndarray:
-    """Return a single binary mask with all circles merged (union)."""
+def circles_mask(
+    image: np.ndarray,
+    circles: list[Circle],
+    shrink_factor: float = 0.9,
+) -> np.ndarray:
+    """Return a single binary mask with all circles merged (union).
+
+    shrink_factor: multiplied by each radius before drawing (< 1 shrinks,
+                   1.0 keeps original radius).
+    """
     mask = np.zeros(image.shape[:2], dtype=np.uint8)
     for c in circles:
-        cv2.circle(mask, (int(c.cx), int(c.cy)), int(c.radius), 255, thickness=-1)
+        cv2.circle(mask, (int(c.cx), int(c.cy)), int(c.radius * shrink_factor), 255, thickness=-1)
     return mask
 
 
@@ -118,6 +127,7 @@ def per_coin_masks(
     image: np.ndarray,
     circles: list[Circle],
     overlap: str = "exclude",  # "include" | "exclude" | "nearest"
+    shrink_factor: float = 0.9,
 ) -> list[np.ndarray]:
     """Return one binary mask per circle, handling overlapping regions.
 
@@ -131,7 +141,7 @@ def per_coin_masks(
     full = []
     for c in circles:
         m = np.zeros((h, w), dtype=np.uint8)
-        cv2.circle(m, (int(c.cx), int(c.cy)), int(c.radius), 255, thickness=-1)
+        cv2.circle(m, (int(c.cx), int(c.cy)), int(c.radius * shrink_factor), 255, thickness=-1)
         full.append(m)
 
     if not circles:
@@ -148,19 +158,13 @@ def per_coin_masks(
     overlap_mask = count > 1  # True where ≥2 circles overlap
 
     if overlap == "exclude":
-        return [
-            np.where(overlap_mask, 0, m).astype(np.uint8)
-            for m in full
-        ]
+        return [np.where(overlap_mask, 0, m).astype(np.uint8) for m in full]
 
     # overlap == "nearest": assign each overlap pixel to closest center
     Y, X = np.mgrid[:h, :w]
     masks = [m.copy() for m in full]
     for y, x in zip(*np.where(overlap_mask)):
-        dists = [
-            (x - c.cx) ** 2 + (y - c.cy) ** 2
-            for c in circles
-        ]
+        dists = [(x - c.cx) ** 2 + (y - c.cy) ** 2 for c in circles]
         winner = int(np.argmin(dists))
         for i, m in enumerate(masks):
             if m[y, x] > 0:
