@@ -1,5 +1,6 @@
 """Batch HoughCircles detection on the full target_set with fixed params."""
 
+import os
 import sys
 import json
 import numpy as np
@@ -39,16 +40,18 @@ PALETTE = [
     (220, 60, 180),
 ]
 
-DATASET = Path("/Users/alessandroteodori/code/2cents-X-IPCV/coin_dataset/target_set")
-OUT_DIR = Path("/Users/alessandroteodori/code/2cents-X-IPCV/exploration/batch_hough")
-MASK_DIR = Path(
-    "/Users/alessandroteodori/code/2cents-X-IPCV/exploration/batch_hough_masks"
-)
-MASK_DIR.mkdir(exist_ok=True)
-OUT_DIR.mkdir(exist_ok=True)
-LOG = Path(
-    "/Users/alessandroteodori/code/2cents-X-IPCV/exploration/batch_hough_results.jsonl"
-)
+ROOT = Path(__file__).resolve().parent.parent
+_dataset = ROOT / "coin_dataset" / "target_set"
+if not _dataset.exists():
+    _dataset = ROOT / "exploration" / "coin_dataset" / "target_set"
+
+DATASET = Path(os.environ.get("COIN_DATASET", _dataset))
+EXPLORATION = Path(os.environ.get("COIN_OUT_DIR", ROOT / "exploration"))
+OUT_DIR = EXPLORATION / "batch_hough"
+MASK_DIR = EXPLORATION / "batch_hough_masks"
+LOG = EXPLORATION / "batch_hough_results.jsonl"
+MASK_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 images = sorted(DATASET.glob("*.jpg")) + sorted(DATASET.glob("*.png"))
 LOG.write_text("")  # reset
