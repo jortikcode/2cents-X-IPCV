@@ -1,7 +1,26 @@
 """Preprocessing pipeline for coin detection: denoising, normalization, and edge extraction."""
 
+from pathlib import Path
+
 import numpy as np
 import cv2
+
+
+def load_target_image(path: Path | str) -> np.ndarray | None:
+    """Read a coin_dataset/target_set photo, correcting its swapped R/B channels.
+
+    target_set JPEGs were exported with red and blue reversed at the source: every
+    coin disc measured has median B > R, which is impossible for copper/gold/silver
+    coins (confirmed against coin_dataset/reference_set, which is not affected).
+    cv2.imread's BGR output must be re-swapped here before any color-dependent step
+    (color_group, classify_bimetallic, display) or hue-based classification silently
+    breaks. Do not use this for reference_set images — those load fine with plain
+    cv2.imread.
+    """
+    img = cv2.imread(str(path))
+    if img is None:
+        return None
+    return img[:, :, ::-1].copy()
 
 
 def _percentile_stretch(

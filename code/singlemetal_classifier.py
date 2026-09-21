@@ -1,0 +1,69 @@
+"""Copper vs gold classification of single-metal coins from colour.
+
+1c, 2c and 5c are copper-plated steel (red-orange); 10c, 20c and 50c are Nordic
+gold (yellow). The two metals differ in hue, so after white balancing the image
+(so the colour of the light does not shift the hue) the coin's average hue
+separates them.
+"""
+
+from pathlib import Path
+
+import numpy as np
+import cv2
+
+from preprocessing_detection import preprocess_gray
+from detection_circles import detect_circles, filter_by_edge_support
+
+COIN_MAX = 0.9  # stop at 0.9r to avoid the rim shadow
+
+COPPER_REFERENCES = ("1cent", "2cent", "5cent")
+GOLD_REFERENCES = ("10cent", "20cent", "50cent")
+
+
+def white_patch(image: np.ndarray) -> np.ndarray:
+    """White balance: the brightest pixels (99th percentile of each channel) become white."""
+    brightest = np.percentile(image, 99, axis=(0, 1))
+    return np.clip(image / brightest * 255, 0, 255).astype(np.uint8)
+
+
+def coin_hue(image: np.ndarray, cx: float, cy: float, r: float) -> float:
+    """Average hue, in degrees, of the coin's pixels.
+
+    Around 10° for copper coins and 25° or more for gold ones.
+    """
+    mask = np.zeros(image.shape[:2], np.uint8)
+    cv2.circle(mask, (round(cx), round(cy)), round(COIN_MAX * r), 255, -1)
+
+    # float input: hue in 0-360 degrees
+    hsv = cv2.cvtColor(image.astype(np.float32) / 255, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0][mask > 0]
+    # hue is circular: 350° is a red, i.e. -10°. Coin colours all lie between
+    # red and yellow, so on this scale a plain mean is a valid average.
+    hue = np.where(hue > 180, hue - 360, hue)
+    return float(hue.mean())
+
+
+def threshold_from_references(reference_dir: Path) -> float:
+    """Threshold halfway between the most yellow copper and the least yellow gold reference.
+
+    Expects one coin per image, named after its denomination (1cent.jpg, 10cent.jpg, ...).
+    """
+    hues = {}
+    for name in COPPER_REFERENCES + GOLD_REFERENCES:
+        image = cv2.imread(str(Path(reference_dir) / f"{name}.jpg"))
+        gray = preprocess_gray(image, use_nlm=False)
+        circles = detect_circles(gray)
+        kept, _, _ = filter_by_edge_support(gray, circles, min_score=0.80)
+        if not circles:
+            raise ValueError(f"no coin detected in reference {name}.jpg")
+        coin = max(kept or circles, key=lambda c: c.radius)
+        hues[name] = coin_hue(white_patch(image), coin.cx, coin.cy, coin.radius)
+
+    most_yellow_copper = max(hues[name] for name in COPPER_REFERENCES)
+    least_yellow_gold = min(hues[name] for name in GOLD_REFERENCES)
+    return (most_yellow_copper + least_yellow_gold) / 2
+
+
+def classify(hue: float, threshold: float) -> str:
+    """Return "copper" or "gold"."""
+    return "gold" if hue > threshold else "copper"
