@@ -1,0 +1,66 @@
+{
+  "10cent": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 1,
+    "bilateral_sigma": 150,
+    "canny_t1": 105,
+    "canny_t2": 180
+  },
+  "1cent": {
+    "use_clahe": true,
+    "use_bilateral": false,
+    "bilateral_d": 7,
+    "bilateral_sigma": 80,
+    "canny_t1": 50,
+    "canny_t2": 100
+  },
+  "1euro": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 7,
+    "bilateral_sigma": 75,
+    "canny_t1": 50,
+    "canny_t2": 140
+  },
+  "20cent": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 7,
+    "bilateral_sigma": 70,
+    "canny_t1": 60,
+    "canny_t2": 150
+  },
+  "2cent": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 7,
+    "bilateral_sigma": 85,
+    "canny_t1": 65,
+    "canny_t2": 155
+  },
+  "2euro": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 7,
+    "bilateral_sigma": 75,
+    "canny_t1": 50,
+    "canny_t2": 140
+  },
+  "50cent": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 7,
+    "bilateral_sigma": 75,
+    "canny_t1": 60,
+    "canny_t2": 150
+  },
+  "5cent": {
+    "use_clahe": true,
+    "use_bilateral": true,
+    "bilateral_d": 7,
+    "bilateral_sigma": 80,
+    "canny_t1": 65,
+    "canny_t2": 155
+  }
+}
