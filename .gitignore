@@ -1,7 +1,9 @@
+exploration
 exploration/*
 coin_dataset/*
 
 GEMINI.md
+CLAUDE.md
 uv.lock
 __MACOSX/
 __pycache__
