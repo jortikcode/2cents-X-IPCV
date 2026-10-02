@@ -397,6 +397,68 @@ def align_rotation(polar: np.ndarray, shift: int) -> np.ndarray:
     return np.roll(polar, -shift, axis=1)
 
 
+def alignment_profile(
+    target_map: np.ndarray,
+    ref_map: np.ndarray,
+    metric: Literal["phase_corr", "zncc", "sad"] = "phase_corr",
+    weight: np.ndarray | None = None,
+) -> tuple[np.ndarray, int, float]:
+    """Find the best rotational alignment between two maps under a chosen metric.
+
+    Generalizes rotation_correlation_profile (phase_corr) to also support a
+    brute-force scan driven by zncc or sad, so the metric used to *find* the
+    rotation can be selected independently of the metric(s) used later to
+    *score* the match. Same roll(-s, axis=1) convention as align_rotation, so
+    the returned shift can be passed straight to it.
+
+    Parameters
+    ----------
+    target_map, ref_map : np.ndarray
+        Two (n_r, n_theta) maps (polar or edge — anything align_rotation can roll).
+    metric : Literal["phase_corr", "zncc", "sad"]
+        Which metric drives the search. "phase_corr" is the fast FFT-based method
+        (rotation_correlation_profile); "zncc"/"sad" brute-force every shift.
+    weight : np.ndarray | None
+        Radial weight, shape (n_r,) — only used by zncc/sad (phase_corr has its
+        own row-mean handling and ignores this).
+
+    Returns
+    -------
+    profile : np.ndarray
+        Shape (n_theta,); raw metric value per shift (not normalized).
+    shift : int
+        argmax(profile), in theta pixels.
+    peak : float
+        Confidence proxy in [0, 1]. For phase_corr/zncc this is
+        clip(profile[shift], 0, 1) — their raw scale is already ~[-1, 1]. sad is
+        unbounded and always <= 0, so it has no natural [0, 1] scale: peak is
+        instead a z-score of the best shift against the profile's own mean/std,
+        clipped to [0, 1] — it means "how much of an outlier is the best shift",
+        not an absolute match quality, and is not comparable across metrics.
+    """
+    if metric == "phase_corr":
+        profile = rotation_correlation_profile(target_map, ref_map)
+    else:
+        score_fn = zncc if metric == "zncc" else sad
+        n_theta = target_map.shape[1]
+        profile = np.empty(n_theta, dtype=np.float64)
+        for s in range(n_theta):
+            aligned = np.roll(target_map, -s, axis=1)
+            profile[s] = score_fn(aligned, ref_map, weight=weight)
+
+    shift = int(np.argmax(profile))
+    if metric == "sad":
+        std = float(np.std(profile))
+        if std < 1e-10:
+            peak = 0.0
+        else:
+            z = (float(profile[shift]) - float(profile.mean())) / std
+            peak = float(np.clip(z / 5.0, 0.0, 1.0))
+    else:
+        peak = float(np.clip(float(profile[shift]), 0.0, 1.0))
+    return profile, shift, peak
+
+
 # ---------------------------------------------------------------------------
 # Stage 7 — Phase congruency
 # ---------------------------------------------------------------------------
@@ -692,6 +754,50 @@ def zncc(
     return float((a_c * b_c).sum() / denom)
 
 
+def sad(
+    map_a: np.ndarray,
+    map_b: np.ndarray,
+    mask: np.ndarray | None = None,
+    weight: np.ndarray | None = None,
+) -> float:
+    """Negative mean absolute difference between two maps.
+
+    Negated so that, like zncc, higher = more similar.
+
+    Parameters
+    ----------
+    map_a, map_b : np.ndarray
+        Same-shape arrays (e.g. polar or edge maps).
+    mask : np.ndarray | None
+        Optional boolean mask to restrict the computation.
+    weight : np.ndarray | None
+        Optional radial weight array of shape (n_r,), broadcast along theta.
+
+    Returns
+    -------
+    score : float
+        -mean(|a - b|); 0 = identical, more negative = more different.
+    """
+    a = map_a.astype(np.float64)
+    b = map_b.astype(np.float64)
+    if mask is None:
+        mask = np.ones(a.shape, dtype=bool)
+    mask = np.asarray(mask, dtype=bool)
+
+    if weight is not None:
+        w = np.asarray(weight, dtype=np.float64)
+        if w.ndim == 1:
+            w = w[:, np.newaxis]
+        a = a * w
+        b = b * w
+
+    a_m = a[mask]
+    b_m = b[mask]
+    if a_m.size == 0:
+        return 0.0
+    return float(-np.mean(np.abs(a_m - b_m)))
+
+
 # ---------------------------------------------------------------------------
 # Stage 9 — Reference set builder
 # ---------------------------------------------------------------------------
@@ -817,6 +923,126 @@ def load_reference_set(path: Path) -> dict[str, dict]:
             "color_group": str(data[f"{label}/color_group"][0]),
             "polar": data[f"{label}/polar"],
             "pc_map": data[f"{label}/pc_map"],
+        }
+    return refs
+
+
+def build_reference_set_edge(
+    ref_images: list[np.ndarray],
+    ref_circles: list[tuple[float, float, float]],
+    labels: list[str],
+    params: dict,
+    save_path: Path | None = None,
+) -> dict[str, dict]:
+    """Like build_reference_set, but stores an edge map (edge_map) instead of a
+    phase-congruency map, for ZNCC/SAD matching on raw polar + edge features
+    instead of phase congruency.
+
+    Parameters
+    ----------
+    ref_images, ref_circles, labels, save_path
+        Same as build_reference_set.
+    params : dict
+        Pipeline parameters. In addition to build_reference_set's keys, needs
+        edge_method, edge_blur_ksize, canny_lo, canny_hi.
+
+    Returns
+    -------
+    refs : dict[str, dict]
+        label -> {"disc", "mask", "color_group", "polar", "edge"}.
+    """
+    refs: dict[str, dict] = {}
+    for img, circle, label in zip(ref_images, ref_circles, labels):
+        disc, mask = extract_disc(img, *circle, target_radius=params["target_radius"])
+        gray = preprocess_disc(
+            disc,
+            mask,
+            **{
+                k: v
+                for k, v in params.items()
+                if k
+                in (
+                    "use_nlm_colored",
+                    "nlm_h_color",
+                    "median_ksize",
+                    "use_nlm",
+                    "nlm_h",
+                    "gaussian_ksize",
+                    "normalize",
+                )
+            },
+        )
+        group = color_group(
+            disc,
+            mask,
+            **{
+                k: v
+                for k, v in params.items()
+                if k
+                in (
+                    "copper_hue_range",
+                    "gold_hue_range",
+                    "bimetallic_discontinuity_thresh",
+                )
+            },
+        )
+        polar = to_polar(gray, n_theta=params["n_theta"], n_r=params["n_r"])
+        edge = edge_map(
+            polar,
+            method=params["edge_method"],
+            blur_ksize=params["edge_blur_ksize"],
+            canny_lo=params["canny_lo"],
+            canny_hi=params["canny_hi"],
+        )
+        refs[label] = {
+            "disc": disc,
+            "mask": mask,
+            "color_group": group,
+            "polar": polar,
+            "edge": edge,
+        }
+
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        arrays = {}
+        for label, ref in refs.items():
+            for key, val in ref.items():
+                if isinstance(val, np.ndarray):
+                    arrays[f"{label}/{key}"] = val
+                else:
+                    arrays[f"{label}/{key}"] = np.array([val])
+        arrays["_labels"] = np.array(labels)
+        arrays["_params"] = np.array([params], dtype=object)
+        np.savez_compressed(save_path, **arrays)
+
+    return refs
+
+
+def load_reference_set_edge(path: Path) -> dict[str, dict]:
+    """Load a reference set saved by build_reference_set_edge.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the .npz archive.
+
+    Returns
+    -------
+    refs : dict[str, dict]
+        label -> {"disc", "mask", "color_group", "polar", "edge"}.
+    """
+    path = Path(path)
+    data = np.load(path, allow_pickle=True)
+    labels = [str(l) for l in data["_labels"]]
+    refs: dict[str, dict] = {}
+    for label in labels:
+        refs[label] = {
+            "disc": data[f"{label}/disc"],
+            "mask": data[f"{label}/mask"],
+            "color_group": str(data[f"{label}/color_group"][0]),
+            "polar": data[f"{label}/polar"],
+            "edge": data[f"{label}/edge"],
         }
     return refs
 

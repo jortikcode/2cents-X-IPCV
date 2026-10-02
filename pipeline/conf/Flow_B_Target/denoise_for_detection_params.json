@@ -1,0 +1,15 @@
+{
+  "channel": "LAB_L",
+  "median_ksize": 3,
+  "use_nlm": true,
+  "nlm_h": 45.0,
+  "template_window_size": 7,
+  "search_window_size": 21,
+  "gaussian_ksize": 11,
+  "normalize": "clahe",
+  "clahe_clip_limit": 1.2,
+  "clahe_tile_grid_size": [
+    16,
+    16
+  ]
+}
