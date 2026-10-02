@@ -1,0 +1,8 @@
+{
+  "invert_channels": true,
+  "nlm_h": 12.0,
+  "nlm_h_color": 20.0,
+  "template_window_size": 7,
+  "search_window_size": 21,
+  "median_ksize": 3
+}

@@ -115,11 +115,10 @@ def plot_random_sample(
 
     for idx, key in enumerate(sampled_keys):
         ax = axes[idx]
-        img_bgr = images[key]
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        h, w = img_bgr.shape[:2]
+        img_display = images[key]
+        h, w = img_display.shape[:2]
 
-        ax.imshow(img_rgb)
+        ax.imshow(img_display)
         ax.set_title(f"{key}\n({w}x{h} px)", fontsize=11, fontweight="bold")
         ax.axis("off")
 
