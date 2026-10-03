@@ -136,13 +136,8 @@ def denoise_single_image_colored(
     if median_k > 1:
         denoised_bgr = cv2.medianBlur(denoised_bgr, median_k)
 
-    # Riconversione a RGB per la memorizzazione e visualizzazione naturale (monete non blu)
-    if invert_channels:
-        denoised_rgb = cv2.cvtColor(denoised_bgr, cv2.COLOR_BGR2RGB)
-    else:
-        denoised_rgb = denoised_bgr.copy()
-
-    return denoised_rgb
+    # Restituisce l'immagine denoised in formato BGR standard (consistente sia in memoria che su disco)
+    return denoised_bgr
 
 
 def denoise_target_images_colored(
@@ -189,17 +184,16 @@ def denoise_target_images_colored(
     print(f"Parametri applicati: NLM_h={params.get('nlm_h')}, NLM_hColor={params.get('nlm_h_color')}, Median={params.get('median_ksize')}x{params.get('median_ksize')}")
 
     for idx, (img_name, raw_img) in enumerate(target_images.items(), start=1):
-        denoised_rgb = denoise_single_image_colored(raw_img, params)
-        denoised_images[img_name] = denoised_rgb
+        denoised_bgr = denoise_single_image_colored(raw_img, params)
+        denoised_images[img_name] = denoised_bgr
 
-        h, w = denoised_rgb.shape[:2]
+        h, w = denoised_bgr.shape[:2]
         png_filename = f"{img_name}.png"
         artifact_rel_path = f"pipeline/artifacts/Flow_B_Target/module4_denoise_colored/{png_filename}"
 
         if save_artifacts:
-            # Salvataggio lossless PNG: convertiamo in BGR prima di cv2.imwrite per compatibilità con visualizzatori esterni
-            save_bgr = cv2.cvtColor(denoised_rgb, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(str(out_path / png_filename), save_bgr)
+            # Salvataggio lossless PNG in formato BGR standard
+            cv2.imwrite(str(out_path / png_filename), denoised_bgr)
 
         # Record metadati con 'foreign_key' identica alla chiave di 'annotated_images.json'
         metadata_records[img_name] = {
@@ -209,7 +203,7 @@ def denoise_target_images_colored(
             "artifact_path": artifact_rel_path,
             "width": w,
             "height": h,
-            "color_space": "RGB",
+            "color_space": "BGR",
             "denoise_params": {
                 "nlm_h": params.get("nlm_h"),
                 "nlm_h_color": params.get("nlm_h_color"),
@@ -279,7 +273,7 @@ def plot_denoise_colored_sample(
 
         # Colonna 2: Denoised a Colori (NLM + Median)
         ax_den = axes[i, 1]
-        ax_den.imshow(denoised_img)
+        ax_den.imshow(cv2.cvtColor(denoised_img, cv2.COLOR_BGR2RGB))
         ax_den.set_title(f"Denoised a Colori (NLM h=12, hColor=20 + Med 3x3): {key}", fontsize=11, fontweight="bold")
         ax_den.axis("off")
 
