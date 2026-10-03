@@ -4,7 +4,7 @@
   "hue_threshold": 17.5,
   "roi_canvas_size": 250,
   "roi_target_radius": 100.0,
-  "classes": [
+  "kinds": [
     "1 euro",
     "2 euro",
     "gold",

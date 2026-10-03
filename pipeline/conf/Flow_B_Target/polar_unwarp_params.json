@@ -1,0 +1,17 @@
+{
+  "roi_canvas_size": 250,
+  "roi_target_radius": 100.0,
+  "center": [125.0, 125.0],
+  "max_radius": 100.0,
+  "use_clahe": true,
+  "clahe_clip_limit": 2.0,
+  "clahe_tile_grid": [8, 8],
+  "use_bilateral": true,
+  "bilateral_d": 7,
+  "bilateral_sigma": 75.0,
+  "canny_t1": 50,
+  "canny_t2": 140,
+  "blur_ksize": [5, 5],
+  "polar_dims": [360, 50],
+  "normalize_energy": true
+}
