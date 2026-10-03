@@ -1,0 +1,22 @@
+{
+  "reference_polar_dir": "pipeline/artifacts/Flow_A_Reference/module5_polar_unwarp",
+  "metric": "circular_zncc",
+  "kind_to_candidates": {
+    "1 euro": [
+      "1euro"
+    ],
+    "2 euro": [
+      "2euro"
+    ],
+    "gold": [
+      "10cent",
+      "20cent",
+      "50cent"
+    ],
+    "copper": [
+      "1cent",
+      "2cent",
+      "5cent"
+    ]
+  }
+}

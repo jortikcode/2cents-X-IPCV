@@ -1,0 +1,34 @@
+{
+  "diameters_mm": {
+    "1cent": 16.25,
+    "2cent": 18.75,
+    "10cent": 19.75,
+    "5cent": 21.25,
+    "20cent": 22.25,
+    "1euro": 23.25,
+    "50cent": 24.25,
+    "2euro": 25.75
+  },
+  "kind_to_candidates": {
+    "1 euro": [
+      "1euro"
+    ],
+    "2 euro": [
+      "2euro"
+    ],
+    "gold": [
+      "10cent",
+      "20cent",
+      "50cent"
+    ],
+    "copper": [
+      "1cent",
+      "2cent",
+      "5cent"
+    ]
+  },
+  "monotonicity_tolerance_px": 3.0,
+  "weight_ratio_error": 10.0,
+  "weight_scale_cv": 20.0,
+  "weight_monotonicity_violation": 50.0
+}
