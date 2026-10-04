@@ -20,6 +20,11 @@ RING_MIN, RING_MAX = 0.8, 0.9  # stop at 0.9r to avoid the rim shadow
 
 BIMETAL_REFERENCES = ("1euro", "2euro")
 
+# Decide a coin only if it lies at least halfway between the threshold and the
+# nearest reference coin. Closer than that, the photo alone (noise, lighting)
+# could put it on either side, so the decision is left to the next step.
+CONFIDENT = 0.5
+
 
 def ring_minus_centre(image: np.ndarray, cx: float, cy: float, r: float) -> float:
     """Mean yellowness (LAB b*) of the ring minus that of the centre.
@@ -36,8 +41,11 @@ def ring_minus_centre(image: np.ndarray, cx: float, cy: float, r: float) -> floa
     return float(yellow[ring].mean() - yellow[centre].mean())
 
 
-def threshold_from_references(reference_dir: Path) -> float:
+def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
     """Threshold halfway between the single-metal and the bimetal reference coins.
+
+    Returns the threshold and half the gap between those two coins, which is the
+    unit `confidence` is measured in.
 
     Expects one coin per image, named after its denomination (1euro.jpg, 2cent.jpg, ...).
     """
@@ -56,7 +64,15 @@ def threshold_from_references(reference_dir: Path) -> float:
         abs(d) for name, d in deltas.items() if name not in BIMETAL_REFERENCES
     )
     smallest_bimetal = min(abs(deltas[name]) for name in BIMETAL_REFERENCES)
-    return (largest_single + smallest_bimetal) / 2
+    return (largest_single + smallest_bimetal) / 2, (smallest_bimetal - largest_single) / 2
+
+
+def confidence(delta: float, threshold: float, half_gap: float) -> float:
+    """Distance from the threshold, in units of the distance to the nearest reference.
+
+    1.0 means the coin is as clear-cut as the nearest reference coin was.
+    """
+    return abs(abs(delta) - threshold) / half_gap
 
 
 def classify(delta: float, threshold: float) -> str:
