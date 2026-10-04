@@ -131,10 +131,11 @@ def load_reference_polar_matrices(ref_dir: Optional[Union[str, Path]] = None) ->
 
 def compute_circular_zncc(target: np.ndarray, reference: np.ndarray) -> Tuple[float, int]:
     """
-    Calcola la Zero-Normalized Cross-Correlation circolare lungo l'asse angolare (asse 0, 360 bins).
+    Calcola la Zero-Normalized Cross-Correlation circolare lungo l'asse angolare (360 bins).
     
-    Essendo la matrice polare (theta, r) di dimensione (360, 50), una rotazione della moneta
-    corrisponde ad uno shift circolare ciclico lungo l'asse 0.
+    Supporta matrici polari orizzontali (50 righe r x 360 colonne theta) ed effettua
+    la correlazione circolare lungo l'asse angolare (asse 1, colonne).
+    (Supporta retrocompatibilmente anche matrici verticali 360x50 se fornite).
     
     Usando la FFT lungo l'asse angolare:
     - Zero-mean: sottrae la media globale per eliminare bias di illuminazione / densità bordi
@@ -162,15 +163,24 @@ def compute_circular_zncc(target: np.ndarray, reference: np.ndarray) -> Tuple[fl
         return 0.0, 0
     r_norm = (r - r_mean) / (r_std * np.sqrt(r.size))
 
-    # 2. Correlazione circolare tramite FFT lungo l'asse angolare (asse 0)
-    T_fft = np.fft.fft(t_norm, axis=0)
-    R_fft = np.fft.fft(r_norm, axis=0)
+    # Individuazione dell'asse angolare (la dimensione con 360 bins)
+    # Default matrice orizzontale (50 righe r, 360 colonne theta): ang_axis = 1, rad_axis = 0
+    if t.shape[1] == 360 or t.shape[0] == 50:
+        ang_axis = 1
+        rad_axis = 0
+    else:
+        ang_axis = 0
+        rad_axis = 1
+
+    # 2. Correlazione circolare tramite FFT lungo l'asse angolare
+    T_fft = np.fft.fft(t_norm, axis=ang_axis)
+    R_fft = np.fft.fft(r_norm, axis=ang_axis)
 
     # Teorema della correlazione: IFFT(T * conj(R))
-    corr_per_col = np.fft.ifft(T_fft * np.conj(R_fft), axis=0).real
+    corr_matrix = np.fft.ifft(T_fft * np.conj(R_fft), axis=ang_axis).real
 
-    # Somma su tutte le 50 colonne radiali per ottenere la correlazione angolare (360 bins)
-    corr_profile = np.sum(corr_per_col, axis=1)
+    # Somma lungo l'asse radiale per ottenere la correlazione angolare aggregata (360 bins)
+    corr_profile = np.sum(corr_matrix, axis=rad_axis)
 
     best_shift = int(np.argmax(corr_profile))
     best_score = float(corr_profile[best_shift])
@@ -228,9 +238,76 @@ def create_labeled_denomination_image(
     return labeled
 
 
+def extract_clean_coin_roi(
+    img_bgr: np.ndarray,
+    cx: float,
+    cy: float,
+    radius: float,
+    canvas_size: int = 250,
+    target_radius: float = 100.0
+) -> np.ndarray:
+    """
+    Estrae la ROI quadrata e centrata della moneta, normalizzata a canvas_size x canvas_size
+    con raggio normalizzato target_radius, applicando una maschera circolare pulita (senza testi pregressi).
+    """
+    center = canvas_size / 2.0
+    scale = target_radius / max(radius, 1.0)
+    T = np.float32([
+        [scale, 0, center - cx * scale],
+        [0, scale, center - cy * scale]
+    ])
+    roi = cv2.warpAffine(
+        img_bgr,
+        T,
+        (canvas_size, canvas_size),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0)
+    )
+    yy, xx = np.ogrid[:canvas_size, :canvas_size]
+    circle_mask = ((xx - center) ** 2 + (yy - center) ** 2) <= (target_radius ** 2)
+    roi_masked = roi.copy()
+    roi_masked[~circle_mask] = 0
+    return roi_masked
+
+
+def load_target_image(
+    img_name: str,
+    denoised_images: Optional[Dict[str, np.ndarray]] = None,
+    image_cache: Optional[Dict[str, np.ndarray]] = None
+) -> Optional[np.ndarray]:
+    """Carica l'immagine target a colori (privilegiando il denoised di Modulo 4)."""
+    if denoised_images and img_name in denoised_images:
+        return denoised_images[img_name]
+
+    if image_cache is not None and img_name in image_cache:
+        return image_cache[img_name]
+
+    # Prova da artifacts Modulo 4 (module4_denoise_colored)
+    pipeline_dir = Path(__file__).resolve().parents[2]
+    denoised_path = pipeline_dir / "artifacts" / "Flow_B_Target" / "module4_denoise_colored" / f"{img_name}.png"
+    if denoised_path.exists():
+        img = cv2.imread(str(denoised_path))
+        if image_cache is not None:
+            image_cache[img_name] = img
+        return img
+
+    # Fallback su target_set originale
+    project_root = Path(__file__).resolve().parents[3]
+    target_path = project_root / "coin_dataset" / "target_set" / f"{img_name}.jpg"
+    if target_path.exists():
+        img = cv2.imread(str(target_path))
+        if image_cache is not None:
+            image_cache[img_name] = img
+        return img
+
+    return None
+
+
 def classify_single_coin_images(
     annotated_images: Dict[str, Any],
     reference_matrices: Optional[Dict[str, np.ndarray]] = None,
+    denoised_images: Optional[Dict[str, np.ndarray]] = None,
     params: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     save_artifacts: bool = True
@@ -281,6 +358,7 @@ def classify_single_coin_images(
     proj_root = Path(__file__).resolve().parents[3]
     updated_annotated: Dict[str, Any] = json.loads(json.dumps(annotated_images))
     labeled_single_rois: Dict[str, np.ndarray] = {}
+    image_cache: Dict[str, np.ndarray] = {}
 
     single_coin_images = [img for img, data in updated_annotated.items() if len(data.get("coins", [])) == 1]
     multi_coin_images = [img for img, data in updated_annotated.items() if len(data.get("coins", [])) > 1]
@@ -344,11 +422,13 @@ def classify_single_coin_images(
         class_counts[best_cand] = class_counts.get(best_cand, 0) + 1
         classified_single_coins += 1
 
-        # 5. Creazione e salvataggio dell'immagine ROI con etichetta negli artifacts
-        # Carica la ROI della moneta da Modulo 5 o ricava
-        roi_img_file = Path(__file__).resolve().parents[2] / "artifacts" / "Flow_B_Target" / "module5_coin_color_classification" / f"{coin_key}.png"
-        if roi_img_file.exists():
-            base_roi = cv2.imread(str(roi_img_file))
+        # 5. Creazione e salvataggio dell'immagine ROI con etichetta pulita negli artifacts
+        # Estrae la ROI pulita direttamente dall'immagine sorgente denoised (evitando scritte pregresse)
+        full_img = load_target_image(img_name, denoised_images=denoised_images, image_cache=image_cache)
+        if full_img is not None:
+            cx, cy = float(coin["center"][0]), float(coin["center"][1])
+            radius = float(coin["radius"])
+            base_roi = extract_clean_coin_roi(full_img, cx, cy, radius, canvas_size=250, target_radius=100.0)
         else:
             base_roi = np.zeros((250, 250, 3), dtype=np.uint8)
 
@@ -383,7 +463,8 @@ def plot_single_coin_classification_sample(
     labeled_rois: Dict[str, np.ndarray],
     n_samples: int = 8,
     seed: Optional[int] = None,
-    figsize: tuple = (16, 8)
+    figsize: tuple = (16, 8),
+    show_plot: bool = True
 ):
     """
     Mostra a schermo una griglia di campioni di monete singole classificate,
@@ -418,7 +499,8 @@ def plot_single_coin_classification_sample(
 
     plt.suptitle(f"Modulo 7.1: Campione Monete Singole Classificate ({len(sample_keys)} monete)", fontsize=14, y=0.98)
     plt.tight_layout()
-    plt.show()
+    if show_plot:
+        plt.show()
     plt.close(fig)
 
 

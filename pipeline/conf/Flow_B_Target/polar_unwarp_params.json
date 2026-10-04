@@ -12,6 +12,6 @@
   "canny_t1": 50,
   "canny_t2": 140,
   "blur_ksize": [5, 5],
-  "polar_dims": [360, 50],
+  "polar_dims": [50, 360],
   "normalize_energy": true
 }

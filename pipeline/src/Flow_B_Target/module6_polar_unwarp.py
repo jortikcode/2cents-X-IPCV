@@ -87,7 +87,7 @@ def load_or_create_polar_params(json_path: Optional[Union[str, Path]] = None) ->
         "canny_t1": 50,
         "canny_t2": 140,
         "blur_ksize": [5, 5],
-        "polar_dims": [360, 50],
+        "polar_dims": [50, 360],
         "normalize_energy": True
     }
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -176,25 +176,30 @@ def compute_polar_unwarp(
     edge_img: np.ndarray,
     center: Tuple[float, float] = (125.0, 125.0),
     max_radius: float = 100.0,
-    dims: Tuple[int, int] = (360, 50),
+    dims: Tuple[int, int] = (50, 360),
     blur_ksize: Optional[Tuple[int, int]] = (5, 5),
     normalize_energy: bool = True
 ) -> np.ndarray:
     """
-    Trasforma la mappa degli edge in una matrice di coordinate polari (theta, r).
+    Trasforma la mappa degli edge in una matrice di coordinate polari (r, theta) orizzontale.
     
     Args:
         edge_img: Immagine 2D grayscale degli edge (250x250 px).
         center: Centro della moneta normalizzata (cx, cy).
         max_radius: Raggio massimo di campionamento.
-        dims: Dimensioni della matrice polare (ang_bins, rad_bins), default (360, 50).
+        dims: Dimensioni della matrice polare (rad_bins, ang_bins) o viceversa, default (50, 360).
         blur_ksize: Kernel gaussiano per ammorbidire le transizioni dei bordi.
         normalize_energy: Se True, normalizza la somma totale dell'energia a 1.0.
         
     Returns:
-        np.ndarray: Matrice float32 di forma (360, 50).
+        np.ndarray: Matrice float32 orizzontale di forma (50, 360).
     """
-    ang_bins, rad_bins = dims
+    d1, d2 = dims
+    if d1 < d2:
+        rad_bins, ang_bins = d1, d2
+    else:
+        ang_bins, rad_bins = d1, d2
+
     img = edge_img.copy()
 
     # 1. Gaussian Blur per ammorbidire le transizioni binarie
@@ -216,9 +221,10 @@ def compute_polar_unwarp(
     else:
         polar_matrix = polar_full
 
-    polar_matrix = polar_matrix.astype(np.float32)
+    # 4. Trasposizione per ottenere l'organizzazione orizzontale richiesta: (50 righe raggio x 360 colonne theta)
+    polar_matrix = polar_matrix.T.astype(np.float32)
 
-    # 4. Normalizzazione dell'energia totale
+    # 5. Normalizzazione dell'energia totale
     if normalize_energy:
         total_energy = float(np.sum(polar_matrix))
         if total_energy > 0:
@@ -367,19 +373,21 @@ def plot_polar_unwarp_sample(
     polar_matrices: Dict[str, np.ndarray],
     n_samples: int = 8,
     seed: Optional[int] = None,
-    figsize: tuple = (16, 8)
+    figsize: tuple = (16, 7),
+    show_plot: bool = True
 ):
     """
-    Visualizza a schermo una griglia con le matrici di polar unwarp estratte
-    (asse Y: angolo theta [0..360°], asse X: raggio r [0..R]), mostrando
+    Visualizza a schermo una griglia con le matrici di polar unwarp estratte in orizzontale
+    (asse X: angolo theta [0..360°], asse Y: raggio r [0..50 bins]), mostrando
     anche la tipologia ('kind') e la confidenza determinata dal Modulo 5.
     
     Args:
         updated_annotated: Data structure con i metadati delle monete.
-        polar_matrices: Dizionario {f"{image_name}_{coin_id}": polar_matrix (360x50)}.
+        polar_matrices: Dizionario {f"{image_name}_{coin_id}": polar_matrix (50x360)}.
         n_samples: Numero di campioni da visualizzare (default: 8).
         seed: Seed opzionale.
         figsize: Dimensioni figura matplotlib.
+        show_plot: Se True invoca plt.show(), altrimenti chiude la figura.
     """
     if not polar_matrices:
         print("Nessuna matrice polare disponibile per la visualizzazione.")
@@ -422,20 +430,22 @@ def plot_polar_unwarp_sample(
         ax = axes[idx]
         mat = polar_matrices[key]
 
-        # Visualizzazione della matrice polare (theta vs r)
-        im = ax.imshow(mat, aspect="auto", cmap="viridis", extent=[0, 50, 360, 0])
+        # Visualizzazione della matrice polare orizzontale (Asse X: theta 0..360°, Asse Y: r 0..50)
+        mat_disp = mat if mat.shape[0] == 50 else mat.T
+        im = ax.imshow(mat_disp, aspect="auto", cmap="viridis", origin="lower", extent=[0, 360, 0, 50])
         pct = int(round(conf * 100)) if conf > 0 else 0
         conf_str = f" ({pct}%)" if conf > 0 else ""
         ax.set_title(f"{key}\n{knd.upper()}{conf_str}", fontsize=11, fontweight="bold")
-        ax.set_xlabel("Raggio r (bins)", fontsize=9)
-        ax.set_ylabel(r"Angolo $\theta$ (gradi)", fontsize=9)
+        ax.set_xlabel(r"Angolo $\theta$ (gradi: 0° - 360°)", fontsize=9)
+        ax.set_ylabel("Raggio r (bins)", fontsize=9)
 
     for idx in range(len(selected), len(axes)):
         axes[idx].axis("off")
 
-    plt.suptitle(f"Modulo 6: Campione Matrici Polar Unwarp (360x50) ({len(selected)} monete)", fontsize=14, y=0.98)
+    plt.suptitle(f"Modulo 6: Campione Matrici Polar Unwarp (50x360) ({len(selected)} monete)", fontsize=14, y=0.98)
     plt.tight_layout()
-    plt.show()
+    if show_plot:
+        plt.show()
     plt.close(fig)
 
 

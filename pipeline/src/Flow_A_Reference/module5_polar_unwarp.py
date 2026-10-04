@@ -31,29 +31,34 @@ def compute_polar_unwarp(
     edge_img: np.ndarray,
     center: Tuple[float, float] = (125.0, 125.0),
     max_radius: float = 100.0,
-    dims: Tuple[int, int] = (360, 50),
+    dims: Tuple[int, int] = (50, 360),
     blur_ksize: Optional[Tuple[int, int]] = (5, 5),
     normalize_energy: bool = True
 ) -> np.ndarray:
     """
-    Trasforma una mappa di edge (250x250) in una matrice in coordinate polari (theta, r).
+    Trasforma una mappa di edge (250x250) in una matrice in coordinate polari (r, theta) orizzontale.
     
     Args:
         edge_img: Immagine 2D grayscale/binaria degli edge (250x250 px).
         center: Centro della moneta normalizzata (cx, cy), default (125.0, 125.0).
         max_radius: Raggio massimo di campionamento in pixel, default 100.0.
-        dims: Dimensioni della matrice polare (ang_bins, rad_bins), default (360, 50).
-              - 360 bins angolari (1 grado per riga da 0 a 359 gradi).
-              - 50 bins radiali (campionamento lungo il raggio da centro a bordo).
+        dims: Dimensioni della matrice polare (rad_bins, ang_bins) o viceversa, default (50, 360).
+              - 50 bins radiali (righe, campionamento lungo il raggio da centro a bordo).
+              - 360 bins angolari (colonne, 1 grado per colonna da 0° a 359°).
         blur_ksize: Dimensione del kernel gaussiano per ammorbidire i contorni binari, default (5, 5).
         normalize_energy: Se True, normalizza la matrice rispetto alla somma totale delle intensità.
         
     Returns:
-        np.ndarray: Matrice float32 di forma (360, 50) dove:
-                    - Asse 0: Angolo theta (0..359 gradi).
-                    - Asse 1: Raggio r (0..max_radius).
+        np.ndarray: Matrice float32 orizzontale di forma (50, 360) dove:
+                    - Asse 0 (righe): Raggio r (0..rad_bins-1, da centro a bordo).
+                    - Asse 1 (colonne): Angolo theta (0..359 gradi).
     """
-    ang_bins, rad_bins = dims
+    d1, d2 = dims
+    if d1 < d2:
+        rad_bins, ang_bins = d1, d2
+    else:
+        ang_bins, rad_bins = d1, d2
+
     img = edge_img.copy()
 
     # 1. Applicazione facoltativa del Gaussian Blur per rendere i bordi continui
@@ -62,7 +67,7 @@ def compute_polar_unwarp(
 
     # 2. Warp polare tramite OpenCV (WARP_POLAR_LINEAR)
     # cv2.warpPolar mappa rho su width e phi su height:
-    # dsize = (int(max_radius), int(ang_bins)) -> shape (360, 100)
+    # dsize = (int(max_radius), int(ang_bins)) -> shape (ang_bins, int(max_radius))
     polar_full = cv2.warpPolar(
         img,
         (int(max_radius), int(ang_bins)),
@@ -71,15 +76,17 @@ def compute_polar_unwarp(
         cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR + cv2.WARP_FILL_OUTLIERS
     )
 
-    # 3. Ridimensionamento della coordinata radiale a rad_bins (es. 50 bins) con INTER_AREA
+    # 3. Ridimensionamento della coordinata radiale a rad_bins (50 bins) con INTER_AREA
     if polar_full.shape[1] != rad_bins:
         polar_matrix = cv2.resize(polar_full, (rad_bins, ang_bins), interpolation=cv2.INTER_AREA)
     else:
         polar_matrix = polar_full
 
-    polar_matrix = polar_matrix.astype(np.float32)
+    # 4. Trasposizione per ottenere l'organizzazione orizzontale richiesta:
+    # Forma (50, 360) -> 50 righe (raggio) x 360 colonne (angolo theta)
+    polar_matrix = polar_matrix.T.astype(np.float32)
 
-    # 4. Normalizzazione facoltativa dell'energia per distribuzioni relative
+    # 5. Normalizzazione facoltativa dell'energia per distribuzioni relative
     if normalize_energy:
         total_energy = float(np.sum(polar_matrix))
         if total_energy > 0:
@@ -93,7 +100,7 @@ def extract_and_save_all_polar(
     output_dir: Optional[Union[str, Path]] = None,
     center: Tuple[float, float] = (125.0, 125.0),
     max_radius: float = 100.0,
-    dims: Tuple[int, int] = (360, 50),
+    dims: Tuple[int, int] = (50, 360),
     blur_ksize: Optional[Tuple[int, int]] = (5, 5),
     normalize_energy: bool = True
 ) -> Dict[str, np.ndarray]:
@@ -102,8 +109,8 @@ def extract_and_save_all_polar(
     
     Serializzazione:
     - Pacchetto completo: 'polar_matrices.npz' contenente tutte le 8 matrici float32 in un unico file compresso.
-    - Singoli file binari: '{nome}_polar.npy' per il caricamento modulare o indipendente di ogni matrice.
-    - File grafici: '{nome}_polar.png' (8-bit normalizzato) per ispezione visiva immediata.
+    - Singoli file binari: '{nome}_polar.npy' per il caricamento modulare o indipendente di ogni matrice (50x360).
+    - File grafici: '{nome}_polar.png' (8-bit normalizzato, 360 px larghezza x 50 px altezza) per ispezione visiva immediata.
     - Metadati: 'polar_metadata.json' con parametri, dimensioni e statistiche energetiche.
     
     Args:
@@ -111,12 +118,12 @@ def extract_and_save_all_polar(
         output_dir: Cartella di output (default: artifacts/Flow_A_Reference/module5_polar_unwarp).
         center: Centro delle ROI normalizzate.
         max_radius: Raggio normalizzato.
-        dims: Dimensioni (theta, r) della matrice polare.
+        dims: Dimensioni (r, theta) della matrice polare (50, 360).
         blur_ksize: Kernel blur per i bordi.
         normalize_energy: Flag di normalizzazione dell'energia totale.
         
     Returns:
-        Dict[str, np.ndarray]: Dizionario in memoria {nome_moneta: polar_matrix (360x50 float32)}.
+        Dict[str, np.ndarray]: Dizionario in memoria {nome_moneta: polar_matrix (50x360 float32)}.
     """
     out_path = Path(output_dir) if output_dir is not None else get_default_artifacts_dir()
     if not out_path.is_absolute() and not out_path.exists():
@@ -220,7 +227,8 @@ def load_saved_polar_matrices(
 def plot_all_polar_matrices(
     polar_dict: Dict[str, np.ndarray],
     figsize: Tuple[int, int] = (16, 10),
-    save_plot: bool = True
+    save_plot: bool = True,
+    show_plot: bool = False
 ):
     """
     Visualizza e salva una griglia 2x4 con le 8 matrici polari estratte.
@@ -234,10 +242,12 @@ def plot_all_polar_matrices(
     for i, name in enumerate(names):
         ax = axes[i]
         mat = polar_dict[name]
-        # Trasposta (.T) per avere l'angolo theta sull'asse X e il raggio sull'asse Y
-        im = ax.imshow(mat.T, aspect="auto", cmap="viridis", origin="lower")
-        ax.set_title(f"Reference: {name} (360° x 50 bins)", fontsize=11, fontweight="bold")
-        ax.set_ylabel("Raggio (r)")
+        # Se la matrice è già (50, 360), la visualizziamo direttamente:
+        # Asse X: Angolo theta (0..359°), Asse Y: Raggio r (0..49 bins)
+        mat_disp = mat if mat.shape[0] == 50 else mat.T
+        im = ax.imshow(mat_disp, aspect="auto", cmap="viridis", origin="lower")
+        ax.set_title(f"Reference: {name} (50 bins r x 360° θ)", fontsize=11, fontweight="bold")
+        ax.set_ylabel("Raggio (r: 0-50)")
         if i >= 6:
             ax.set_xlabel("Angolo θ (Gradi: 0° - 360°)")
         else:
@@ -256,5 +266,25 @@ def plot_all_polar_matrices(
         fig.savefig(summary_path, dpi=150, bbox_inches="tight")
         print(f"Grafico riassuntivo delle matrici polari salvato in: {summary_path}")
 
-    plt.show()
+    if show_plot:
+        plt.show()
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    # Esecuzione standalone per rigenerare le matrici polari di riferimento in formato orizzontale (50x360)
+    pipeline_dir = Path(__file__).resolve().parents[2]
+    edges_dir = pipeline_dir / "artifacts" / "Flow_A_Reference" / "module4_edges"
+    
+    edges_dict = {}
+    for p in sorted(edges_dir.glob("*_edges.png")):
+        coin_name = p.stem.replace("_edges", "")
+        img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+        if img is not None:
+            edges_dict[coin_name] = img
+            
+    print(f"Caricate {len(edges_dict)} mappe di edge da: {edges_dir}")
+    polar_dict = extract_and_save_all_polar(edges_dict, dims=(50, 360))
+    for name, mat in polar_dict.items():
+        print(f"  {name}: shape {mat.shape}, min={mat.min():.4f}, max={mat.max():.4f}")
+    plot_all_polar_matrices(polar_dict, save_plot=True, show_plot=False)
