@@ -56,9 +56,9 @@ def get_default_artifacts_dir() -> Path:
 
 
 def get_default_annotated_images_path() -> Path:
-    """Restituisce il percorso del file annotated_images.json principale."""
+    """Restituisce il percorso del file annotated_images.json unificato in artifacts/Flow_B_Target."""
     pipeline_dir = Path(__file__).resolve().parents[2]
-    return pipeline_dir / "artifacts" / "Flow_B_Target" / "module3_coin_detection" / "annotated_images.json"
+    return pipeline_dir / "artifacts" / "Flow_B_Target" / "annotated_images.json"
 
 
 def get_default_denoised_dir() -> Path:

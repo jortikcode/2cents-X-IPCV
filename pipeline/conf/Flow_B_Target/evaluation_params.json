@@ -1,6 +1,6 @@
 {
   "ground_truth_csv": "pipeline/conf/annotations_with_position.csv",
-  "annotated_images_path": "pipeline/artifacts/Flow_B_Target/module3_coin_detection/annotated_images.json",
+  "annotated_images_path": "pipeline/artifacts/Flow_B_Target/annotated_images.json",
   "artifacts_dir": "pipeline/artifacts/Flow_B_Target/module9_evaluation",
   "matching_method": "hungarian",
   "matching_distance_threshold_factor": 1.0,

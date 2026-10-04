@@ -17,11 +17,10 @@ Questo modulo:
    - Calcola un punteggio di confidence continuo in [0.50, 1.00] (Metodo 1: Margine di Decisione Normalizzato)
      in base alla distanza dai margini decisionali e dai centroidi di riferimento.
 2. Aggiunge in append il campo "kind": "<kind>" e "confidence": <valore> a ogni oggetto moneta
-   nella data structure di 'annotated_images.json' e aggiorna il file JSON.
+   nel manifest unificato 'annotated_images.json' (in artifacts/Flow_B_Target/annotated_images.json).
 3. Salva negli artifacts di output (pipeline/artifacts/Flow_B_Target/module5_coin_color_classification/):
    - Una immagine della ROI mascherata per ciascuna moneta: '{nome_file}_{coin_id}.png'
      con una scritta in sovraimpressione indicante la tipologia e la percentuale di confidenza (es. 'GOLD (92%)').
-   - Il file JSON aggregato 'classified_annotated_images.json'.
 4. Restituisce in memoria la data structure aggiornata e il dizionario delle ROI estratte.
 5. Mostra a video una griglia di campioni rappresentativi delle monete classificate.
 """
@@ -54,9 +53,9 @@ def get_default_flow_a_color_profiles_path() -> Path:
 
 
 def get_default_annotated_images_path() -> Path:
-    """Restituisce il percorso del file annotated_images.json generato dal Modulo 3."""
+    """Restituisce il percorso del file annotated_images.json unificato in artifacts/Flow_B_Target."""
     pipeline_dir = Path(__file__).resolve().parents[2]
-    return pipeline_dir / "artifacts" / "Flow_B_Target" / "module3_coin_detection" / "annotated_images.json"
+    return pipeline_dir / "artifacts" / "Flow_B_Target" / "annotated_images.json"
 
 
 def load_or_create_classification_params(json_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -457,20 +456,14 @@ def classify_all_coins(
         if processed_count % 50 == 0 or processed_count == total_coins:
             print(f"  [{processed_count}/{total_coins}] Monete classificate...")
 
-    # Aggiornamento di annotated_images.json (nella cartella di Modulo 3 e come copia in Modulo 5)
+    # Aggiornamento in append del manifest unificato annotated_images.json
     if save_artifacts:
-        # 1. Aggiorna in append annotated_images.json principale (Modulo 3)
         ann_main_path = get_default_annotated_images_path()
-        if ann_main_path.parent.exists():
-            with open(ann_main_path, "w", encoding="utf-8") as f:
-                json.dump(updated_annotated, f, indent=2)
-            print(f"Aggiornato 'annotated_images.json' in: {ann_main_path.name}")
-
-        # 2. Salva una copia nel manifest di Modulo 5
-        out_meta_file = out_path / "classified_annotated_images.json"
-        with open(out_meta_file, "w", encoding="utf-8") as f:
+        ann_main_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(ann_main_path, "w", encoding="utf-8") as f:
             json.dump(updated_annotated, f, indent=2)
-        print(f"Salvati artefatti Modulo 5 in: {out_path.name}/")
+        print(f"Aggiornato manifest unificato 'annotated_images.json' in: {ann_main_path}")
+        print(f"Salvati artefatti ROI Modulo 5 in: {out_path.name}/")
 
     print("\nRiepilogo Classificazione Cromatica (Kind) delle Monete:")
     for knd_name, count in sorted(kind_counts.items(), key=lambda x: -x[1]):

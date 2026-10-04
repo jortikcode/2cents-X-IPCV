@@ -23,10 +23,9 @@ Logica della pipeline:
      * Somma delle confidence cromatiche estratte dal Modulo 5.
    - Viene selezionata la tupla globale che massimizza lo score di consistenza fisica e cromatica.
 4. Output e Artefatti:
-   - Assegna il campo "class": "<taglio>" a ciascuna moneta in 'annotated_images.json'.
+   - Assegna il campo "class": "<taglio>" a ciascuna moneta nel manifest unificato 'annotated_images.json' (in artifacts/Flow_B_Target/annotated_images.json).
    - Salva negli artifacts (artifacts/Flow_B_Target/module7_2_multi_coin_classification/):
      * Immagine ROI etichettata '{nome_file}_{coin_id}.png' con il taglio classificato.
-     * Manifest 'multi_coin_classified_manifest.json'.
 """
 
 import itertools
@@ -52,9 +51,9 @@ def get_default_artifacts_dir() -> Path:
 
 
 def get_default_annotated_images_path() -> Path:
-    """Restituisce il percorso del file annotated_images.json."""
+    """Restituisce il percorso del file annotated_images.json unificato in artifacts/Flow_B_Target."""
     pipeline_dir = Path(__file__).resolve().parents[2]
-    return pipeline_dir / "artifacts" / "Flow_B_Target" / "module3_coin_detection" / "annotated_images.json"
+    return pipeline_dir / "artifacts" / "Flow_B_Target" / "annotated_images.json"
 
 
 def load_or_create_multi_coin_params(json_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -408,16 +407,13 @@ def classify_multi_coin_images(
         if processed_images % 30 == 0 or processed_images == len(multi_coin_images):
             print(f"  [{processed_images}/{len(multi_coin_images)}] Immagini multiple classificate...")
 
-    # 4. Aggiornamento finale di annotated_images.json principale e manifest Modulo 7.2
+    # 4. Aggiornamento finale del manifest unificato annotated_images.json
     if save_artifacts:
         ann_main_path = get_default_annotated_images_path()
-        if ann_main_path.parent.exists():
-            with open(ann_main_path, "w", encoding="utf-8") as f:
-                json.dump(updated_annotated, f, indent=2)
-            print(f"Aggiornato 'annotated_images.json' in: {ann_main_path.name}")
-
-        with open(out_path / "multi_coin_classified_manifest.json", "w", encoding="utf-8") as f:
+        ann_main_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(ann_main_path, "w", encoding="utf-8") as f:
             json.dump(updated_annotated, f, indent=2)
+        print(f"Aggiornato manifest unificato 'annotated_images.json' in: {ann_main_path}")
         print(f"Salvati artefatti Modulo 7.2 in: {out_path.name}/")
 
     print(f"\nRiepilogo Classificazione Monete Multiple (Modulo 7.2 - {total_multi_coins} monete):")

@@ -17,10 +17,9 @@ Logica della pipeline:
      di riferimento del Flusso A lungo tutti i 360 shift angolari (invarianza a rotazione).
    - Seleziona il candidato con il punteggio massimo di ZNCC.
 4. Output e Artefatti:
-   - Aggiunge in append il campo "class": "<taglio>" alla moneta in 'annotated_images.json'.
+   - Aggiunge in append il campo "class": "<taglio>" alla moneta nel manifest unificato 'annotated_images.json' (in artifacts/Flow_B_Target/annotated_images.json).
    - Salva negli artifacts (artifacts/Flow_B_Target/module7_1_single_coin_classification/):
      * Immagine ROI etichettata '{nome_file}_{coin_id}.png' con il taglio classificato e score ZNCC.
-     * Manifest 'single_coin_classified_manifest.json'.
 """
 
 import json
@@ -45,9 +44,9 @@ def get_default_artifacts_dir() -> Path:
 
 
 def get_default_annotated_images_path() -> Path:
-    """Restituisce il percorso del file annotated_images.json."""
+    """Restituisce il percorso del file annotated_images.json unificato in artifacts/Flow_B_Target."""
     pipeline_dir = Path(__file__).resolve().parents[2]
-    return pipeline_dir / "artifacts" / "Flow_B_Target" / "module3_coin_detection" / "annotated_images.json"
+    return pipeline_dir / "artifacts" / "Flow_B_Target" / "annotated_images.json"
 
 
 def get_default_reference_polar_dir() -> Path:
@@ -438,16 +437,13 @@ def classify_single_coin_images(
         if save_artifacts:
             cv2.imwrite(str(out_path / f"{coin_key}.png"), labeled_roi)
 
-    # 6. Aggiornamento in append di annotated_images.json principale e manifest Modulo 7.1
+    # 6. Aggiornamento in append del manifest unificato annotated_images.json
     if save_artifacts:
         ann_main_path = get_default_annotated_images_path()
-        if ann_main_path.parent.exists():
-            with open(ann_main_path, "w", encoding="utf-8") as f:
-                json.dump(updated_annotated, f, indent=2)
-            print(f"Aggiornato 'annotated_images.json' in: {ann_main_path.name}")
-
-        with open(out_path / "single_coin_classified_manifest.json", "w", encoding="utf-8") as f:
+        ann_main_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(ann_main_path, "w", encoding="utf-8") as f:
             json.dump(updated_annotated, f, indent=2)
+        print(f"Aggiornato manifest unificato 'annotated_images.json' in: {ann_main_path}")
         print(f"Salvati artefatti Modulo 7.1 in: {out_path.name}/")
 
     print(f"\nRiepilogo Classificazione Monete Singole (Modulo 7.1 - {classified_single_coins} monete):")

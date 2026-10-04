@@ -22,7 +22,7 @@ Questo modulo:
        ]
    }
 5. Genera e salva negli artifacts le immagini annotate con i cerchi sovraimpressi ({image_name}.png)
-   e il file aggregato 'annotated_images.json'.
+   e il manifest unificato 'annotated_images.json' (in artifacts/Flow_B_Target/annotated_images.json).
 6. Salva i parametri di configurazione in pipeline/conf/Flow_B_Target/coin_detection_params.json.
 7. Mostra a video un subsample casuale di immagini annotate.
 """
@@ -47,6 +47,12 @@ def get_default_artifacts_dir() -> Path:
     """Restituisce il percorso della cartella artifacts/Flow_B_Target/module3_coin_detection."""
     pipeline_dir = Path(__file__).resolve().parents[2]
     return pipeline_dir / "artifacts" / "Flow_B_Target" / "module3_coin_detection"
+
+
+def get_default_annotated_images_path() -> Path:
+    """Restituisce il percorso del file annotated_images.json unificato in artifacts/Flow_B_Target."""
+    pipeline_dir = Path(__file__).resolve().parents[2]
+    return pipeline_dir / "artifacts" / "Flow_B_Target" / "annotated_images.json"
 
 
 def get_default_detection_params() -> Dict[str, Any]:
@@ -307,15 +313,16 @@ def detect_coins_in_target_images(
             annotated_bgr = draw_coin_annotations(orig_bgr, coins)
             cv2.imwrite(str(out_path / f"{name}.png"), annotated_bgr)
 
-    # 4. Serializzazione globale del JSON degli annotated_images
+    # 4. Serializzazione globale del JSON degli annotated_images unificato
     if save_artifacts:
-        json_file = out_path / "annotated_images.json"
+        json_file = get_default_annotated_images_path()
+        json_file.parent.mkdir(parents=True, exist_ok=True)
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump(annotated_images_dict, f, indent=2)
 
         print(f"Detection completata!")
         print(f"  - Monete totali identificate: {total_coins_detected}")
-        print(f"  - Data structure salvata in: {json_file.name}")
+        print(f"  - Manifest unificato salvato in: {json_file}")
         print(f"  - Immagini annotate salvate in: {out_path}")
 
     return annotated_images_dict

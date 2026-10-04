@@ -19,7 +19,7 @@ utilizzata per le monete di riferimento nel Flusso A (Moduli 4 e 5):
      * Matrice grezza NumPy lossless: '{nome_file}_{coin_id}_polar.npy' (float32, 360x50)
      * Immagine visiva per ispezione: '{nome_file}_{coin_id}_polar.png' (8-bit, 360x50)
      * Immagine mappa edge: '{nome_file}_{coin_id}_edge.png' (250x250)
-2. Come output, aggiorna 'annotated_images.json' in append aggiungendo a ogni moneta:
+2. Come output, aggiorna il manifest unificato 'annotated_images.json' (in artifacts/Flow_B_Target/annotated_images.json) in append aggiungendo a ogni moneta:
    - "polar_unwarp_path": percorso al file .npy della matrice polare
    - "polar_image_path": percorso al file .png dell'immagine polare
 3. Restituisce in memoria la data structure aggiornata e il dizionario delle matrici polari.
@@ -48,9 +48,9 @@ def get_default_artifacts_dir() -> Path:
 
 
 def get_default_annotated_images_path() -> Path:
-    """Restituisce il percorso del file annotated_images.json generato da Modulo 3 e aggiornato da Modulo 5."""
+    """Restituisce il percorso del file annotated_images.json unificato in artifacts/Flow_B_Target."""
     pipeline_dir = Path(__file__).resolve().parents[2]
-    return pipeline_dir / "artifacts" / "Flow_B_Target" / "module3_coin_detection" / "annotated_images.json"
+    return pipeline_dir / "artifacts" / "Flow_B_Target" / "annotated_images.json"
 
 
 def load_or_create_polar_params(json_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
@@ -351,18 +351,13 @@ def process_all_coins_polar(
         if processed_count % 50 == 0 or processed_count == total_coins:
             print(f"  [{processed_count}/{total_coins}] Matrici polari estratte...")
 
-    # 6. Aggiornamento di annotated_images.json principale e manifest Modulo 6
+    # 6. Aggiornamento in append del manifest unificato annotated_images.json
     if save_artifacts:
-        # Aggiorna il file principale in Modulo 3
         ann_main_path = get_default_annotated_images_path()
-        if ann_main_path.parent.exists():
-            with open(ann_main_path, "w", encoding="utf-8") as f:
-                json.dump(updated_annotated, f, indent=2)
-            print(f"Aggiornato 'annotated_images.json' in: {ann_main_path.name}")
-
-        # Salva copia aggregata in Modulo 6
-        with open(out_path / "polar_unwarp_annotated_images.json", "w", encoding="utf-8") as f:
+        ann_main_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(ann_main_path, "w", encoding="utf-8") as f:
             json.dump(updated_annotated, f, indent=2)
+        print(f"Aggiornato manifest unificato 'annotated_images.json' in: {ann_main_path}")
         print(f"Salvati artefatti Modulo 6 in: {out_path.name}/")
 
     return updated_annotated, polar_matrices
