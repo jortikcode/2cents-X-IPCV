@@ -1,0 +1,38 @@
+{
+  "ground_truth_csv": "pipeline/conf/annotations_with_position.csv",
+  "annotated_images_path": "pipeline/artifacts/Flow_B_Target/module3_coin_detection/annotated_images.json",
+  "artifacts_dir": "pipeline/artifacts/Flow_B_Target/module9_evaluation",
+  "matching_method": "hungarian",
+  "matching_distance_threshold_factor": 1.0,
+  "max_distance_px": 50.0,
+  "classes": [
+    "1cent",
+    "2cent",
+    "5cent",
+    "10cent",
+    "20cent",
+    "50cent",
+    "1euro",
+    "2euro"
+  ],
+  "denomination_values_eur": {
+    "1cent": 0.01,
+    "2cent": 0.02,
+    "5cent": 0.05,
+    "10cent": 0.10,
+    "20cent": 0.20,
+    "50cent": 0.50,
+    "1euro": 1.00,
+    "2euro": 2.00
+  },
+  "cents_to_class": {
+    "1": "1cent",
+    "2": "2cent",
+    "5": "5cent",
+    "10": "10cent",
+    "20": "20cent",
+    "50": "50cent",
+    "100": "1euro",
+    "200": "2euro"
+  }
+}
