@@ -86,6 +86,15 @@ def load_or_create_polar_params(json_path: Optional[Union[str, Path]] = None) ->
         "bilateral_sigma": 75.0,
         "canny_t1": 50,
         "canny_t2": 140,
+        "use_adaptive_canny": True,
+        "adaptive_canny_low_pct": 75.0,
+        "adaptive_canny_high_pct": 92.0,
+        "target_edge_min": 800,
+        "target_edge_max": 2800,
+        "cluttered_canny_low_pct": 82.0,
+        "cluttered_canny_high_pct": 95.0,
+        "faint_canny_low_pct": 65.0,
+        "faint_canny_high_pct": 85.0,
         "blur_ksize": [5, 5],
         "polar_dims": [50, 360],
         "normalize_energy": True
@@ -159,15 +168,50 @@ def extract_coin_edge_map(
         if d > 0:
             img_proc = cv2.bilateralFilter(img_proc, d=d, sigmaColor=sigma, sigmaSpace=sigma)
 
-    # 5. Canny Edge Detection
-    t1 = int(params.get("canny_t1", 50))
-    t2 = int(params.get("canny_t2", 140))
-    edge_img = cv2.Canny(img_proc, t1, t2)
-
-    # 6. Maschera circolare per azzerare bordi esterni al disco normalizzato
+    # 5. Canny Edge Detection (Adattivo o Statico)
     yy, xx = np.ogrid[:canvas_size, :canvas_size]
     mask_outside = ((xx - center) ** 2 + (yy - center) ** 2) > ((target_radius - 1.0) ** 2)
-    edge_img[mask_outside] = 0
+    mask_inside = ~mask_outside
+
+    use_adaptive = params.get("use_adaptive_canny", True)
+    if use_adaptive:
+        gx = cv2.Sobel(img_proc, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(img_proc, cv2.CV_32F, 0, 1, ksize=3)
+        mag = np.sqrt(gx**2 + gy**2)
+        vals = mag[mask_inside]
+
+        p_low = float(params.get("adaptive_canny_low_pct", 75.0))
+        p_high = float(params.get("adaptive_canny_high_pct", 92.0))
+        t1 = int(max(25, np.percentile(vals, p_low)))
+        t2 = int(max(t1 + 25, np.percentile(vals, p_high)))
+        edge_img = cv2.Canny(img_proc, t1, t2)
+        edge_img[mask_outside] = 0
+        cnt = int(np.count_nonzero(edge_img))
+
+        target_max = int(params.get("target_edge_max", 2800))
+        target_min = int(params.get("target_edge_min", 800))
+
+        if cnt > target_max:
+            # Sovra-segmentazione / clutter: alza le soglie per ripulire il rumore superficiale
+            p_low_high = float(params.get("cluttered_canny_low_pct", 82.0))
+            p_high_high = float(params.get("cluttered_canny_high_pct", 95.0))
+            t1 = int(max(30, np.percentile(vals, p_low_high)))
+            t2 = int(max(t1 + 30, np.percentile(vals, p_high_high)))
+            edge_img = cv2.Canny(img_proc, t1, t2)
+            edge_img[mask_outside] = 0
+        elif cnt < target_min:
+            # Sotto-segmentazione / rilievi deboli: abbassa le soglie per catturare il conio
+            p_low_faint = float(params.get("faint_canny_low_pct", 65.0))
+            p_high_faint = float(params.get("faint_canny_high_pct", 85.0))
+            t1 = int(max(18, np.percentile(vals, p_low_faint)))
+            t2 = int(max(t1 + 20, np.percentile(vals, p_high_faint)))
+            edge_img = cv2.Canny(img_proc, t1, t2)
+            edge_img[mask_outside] = 0
+    else:
+        t1 = int(params.get("canny_t1", 50))
+        t2 = int(params.get("canny_t2", 140))
+        edge_img = cv2.Canny(img_proc, t1, t2)
+        edge_img[mask_outside] = 0
 
     return roi_gray, edge_img
 
