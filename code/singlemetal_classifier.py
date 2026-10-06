@@ -19,6 +19,11 @@ COIN_MAX = 0.9  # stop at 0.9r to avoid the rim shadow
 COPPER_REFERENCES = ("1cent", "2cent", "5cent")
 GOLD_REFERENCES = ("10cent", "20cent", "50cent")
 
+# Decide a coin only if it lies at least halfway between the threshold and the
+# nearest reference coin. A coin's hue wobbles by about 1.4 degrees when it is
+# photographed like a target image, so anything closer is a coin flip.
+CONFIDENT = 0.5
+
 
 def white_patch(image: np.ndarray) -> np.ndarray:
     """White balance: the brightest pixels (99th percentile of each channel) become white."""
@@ -43,8 +48,11 @@ def coin_hue(image: np.ndarray, cx: float, cy: float, r: float) -> float:
     return float(hue.mean())
 
 
-def threshold_from_references(reference_dir: Path) -> float:
+def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
     """Threshold halfway between the most yellow copper and the least yellow gold reference.
+
+    Returns the threshold and half the gap between those two coins, which is the
+    unit `confidence` is measured in.
 
     Expects one coin per image, named after its denomination (1cent.jpg, 10cent.jpg, ...).
     """
@@ -61,7 +69,15 @@ def threshold_from_references(reference_dir: Path) -> float:
 
     most_yellow_copper = max(hues[name] for name in COPPER_REFERENCES)
     least_yellow_gold = min(hues[name] for name in GOLD_REFERENCES)
-    return (most_yellow_copper + least_yellow_gold) / 2
+    return (most_yellow_copper + least_yellow_gold) / 2, (least_yellow_gold - most_yellow_copper) / 2
+
+
+def confidence(hue: float, threshold: float, half_gap: float) -> float:
+    """Distance from the threshold, in units of the distance to the nearest reference.
+
+    1.0 means the coin is as clear-cut as the nearest reference coin was.
+    """
+    return abs(hue - threshold) / half_gap
 
 
 def classify(hue: float, threshold: float) -> str:
