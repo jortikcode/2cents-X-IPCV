@@ -48,11 +48,8 @@ def coin_hue(image: np.ndarray, cx: float, cy: float, r: float) -> float:
     return float(hue.mean())
 
 
-def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
-    """Threshold halfway between the most yellow copper and the least yellow gold reference.
-
-    Returns the threshold and half the gap between those two coins, which is the
-    unit `confidence` is measured in.
+def reference_hues(reference_dir: Path) -> dict[str, float]:
+    """Hue of every single-metal reference coin, by denomination.
 
     Expects one coin per image, named after its denomination (1cent.jpg, 10cent.jpg, ...).
     """
@@ -66,7 +63,16 @@ def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
             raise ValueError(f"no coin detected in reference {name}.jpg")
         coin = max(kept or circles, key=lambda c: c.radius)
         hues[name] = coin_hue(white_patch(image), coin.cx, coin.cy, coin.radius)
+    return hues
 
+
+def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
+    """Threshold halfway between the most yellow copper and the least yellow gold reference.
+
+    Returns the threshold and half the gap between those two coins, which is the
+    unit `confidence` is measured in.
+    """
+    hues = reference_hues(reference_dir)
     most_yellow_copper = max(hues[name] for name in COPPER_REFERENCES)
     least_yellow_gold = min(hues[name] for name in GOLD_REFERENCES)
     return (most_yellow_copper + least_yellow_gold) / 2, (least_yellow_gold - most_yellow_copper) / 2
