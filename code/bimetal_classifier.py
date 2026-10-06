@@ -74,11 +74,12 @@ def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
 
 
 def confidence(delta: float, threshold: float, half_gap: float) -> float:
-    """Distance from the threshold, in units of the distance to the nearest reference.
+    """Distance from the threshold, in units of the distance to the nearest reference, capped at 1.
 
-    1.0 means the coin is as clear-cut as the nearest reference coin was.
+    0 means the coin is on the threshold; 1 means it is at least as clear-cut
+    as the nearest reference coin was.
     """
-    return abs(abs(delta) - threshold) / half_gap
+    return min(abs(abs(delta) - threshold) / half_gap, 1.0)
 
 
 def classify(delta: float, threshold: float) -> str:
