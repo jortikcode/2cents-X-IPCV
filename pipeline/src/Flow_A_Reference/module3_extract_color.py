@@ -15,7 +15,6 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import cv2
 import matplotlib.pyplot as plt
 
 from module1_load_references import get_default_ref_dir
