@@ -1,9 +1,9 @@
 """Copper vs gold classification of single-metal coins from colour.
 
 1c, 2c and 5c are copper-plated steel (red-orange); 10c, 20c and 50c are Nordic
-gold (yellow). The two metals differ in hue, so after white balancing the image
-(so the colour of the light does not shift the hue) the coin's average hue
-separates them.
+gold (yellow). The two metals differ in hue, so the coin's average hue separates
+them. The images must already be white balanced, so the colour of the light
+does not shift the hue.
 """
 
 from pathlib import Path
@@ -25,14 +25,8 @@ GOLD_REFERENCES = ("10cent", "20cent", "50cent")
 CONFIDENT = 0.5
 
 
-def white_patch(image: np.ndarray) -> np.ndarray:
-    """White balance: the brightest pixels (99th percentile of each channel) become white."""
-    brightest = np.percentile(image, 99, axis=(0, 1))
-    return np.clip(image / brightest * 255, 0, 255).astype(np.uint8)
-
-
 def coin_hue(image: np.ndarray, cx: float, cy: float, r: float) -> float:
-    """Average hue, in degrees, of the coin's pixels.
+    """Average hue, in degrees, of the coin's pixels in a white-balanced image.
 
     Around 10° for copper coins and 25° or more for gold ones.
     """
@@ -51,7 +45,7 @@ def coin_hue(image: np.ndarray, cx: float, cy: float, r: float) -> float:
 def reference_hues(reference_dir: Path) -> dict[str, float]:
     """Hue of every single-metal reference coin, by denomination.
 
-    Expects one coin per image, named after its denomination (1cent.jpg, 10cent.jpg, ...).
+    Expects one white-balanced coin image per denomination (1cent.jpg, 10cent.jpg, ...).
     """
     hues = {}
     for name in COPPER_REFERENCES + GOLD_REFERENCES:
@@ -62,7 +56,7 @@ def reference_hues(reference_dir: Path) -> dict[str, float]:
         if not circles:
             raise ValueError(f"no coin detected in reference {name}.jpg")
         coin = max(kept or circles, key=lambda c: c.radius)
-        hues[name] = coin_hue(white_patch(image), coin.cx, coin.cy, coin.radius)
+        hues[name] = coin_hue(image, coin.cx, coin.cy, coin.radius)
     return hues
 
 

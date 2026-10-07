@@ -140,6 +140,51 @@ def denoise_single_image_colored(
     return denoised_bgr
 
 
+def median_target_images(
+    target_images: Dict[str, np.ndarray],
+    params: Optional[Dict[str, Any]] = None
+) -> Dict[str, np.ndarray]:
+    """
+    Denoising leggero per la classificazione cromatica (Modulo 5): inversione dei canali R/B e
+    solo Median Filter, senza NLM. Il Median Filter rimuove i pixel rumorosi isolati senza spostare
+    il colore medio della moneta, mentre l'NLM a colori lo altera.
+    Usa 'invert_channels' e 'median_ksize' di denoise_colored_params.json.
+
+    Returns:
+        Dict[str, np.ndarray]: Dizionario in memoria {image_name: immagine_bgr}.
+    """
+    if params is None:
+        params = load_or_create_denoise_colored_params()
+    median_k = int(params.get("median_ksize", 3))
+
+    median_images: Dict[str, np.ndarray] = {}
+    for img_name, img in target_images.items():
+        img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR) if params.get("invert_channels", True) else img
+        median_images[img_name] = cv2.medianBlur(img_bgr, median_k) if median_k > 1 else img_bgr
+    return median_images
+
+
+def white_patch(image: np.ndarray) -> np.ndarray:
+    """
+    Bilanciamento del bianco white-patch: i pixel piu' luminosi (99-esimo percentile di ogni canale)
+    diventano bianchi, cosi' il colore della luce non sposta la tonalita' (Hue) delle monete.
+    Usato sulle target (white_patch_images) e sulle reference (Flusso A, Modulo 3).
+    """
+    brightest = np.percentile(image, 99, axis=(0, 1))
+    return np.clip(image / brightest * 255, 0, 255).astype(np.uint8)
+
+
+def white_patch_images(images: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    """
+    Applica il white-patch a ogni immagine BGR (es. l'output di median_target_images).
+    Serve al Modulo 5 per la misura della tonalita' (rame vs oro).
+
+    Returns:
+        Dict[str, np.ndarray]: Dizionario in memoria {image_name: immagine_bgr_bilanciata}.
+    """
+    return {img_name: white_patch(img) for img_name, img in images.items()}
+
+
 def denoise_target_images_colored(
     target_images: Dict[str, np.ndarray],
     params: Optional[Dict[str, Any]] = None,

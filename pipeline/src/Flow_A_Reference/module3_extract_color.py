@@ -4,7 +4,8 @@ Le misure e le soglie sono quelle di code/bimetal_classifier.py e code/singlemet
 - Bimetalliche vs monometalliche: Delta b* (anello - centro), soglia a meta' tra la monometallica
   piu' estrema e la bimetallica meno estrema.
 - Rame vs oro: tonalita' (Hue) dopo white-patch sull'intera immagine, soglia a meta' tra il rame
-  piu' giallo e l'oro meno giallo.
+  piu' giallo e l'oro meno giallo. Il white-patch e' quello del Modulo 4 del Flusso B: le reference
+  bilanciate vengono salvate negli artifacts e misurate da li'.
 
 Le soglie vengono salvate in artifacts/Flow_A_Reference/module3_color/color_profiles.json
 e lette dal Modulo 5 del Flusso B.
@@ -14,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+import cv2
 import matplotlib.pyplot as plt
 
 from module1_load_references import get_default_ref_dir
@@ -22,11 +24,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "code"))
 import bimetal_classifier
 import singlemetal_classifier
 
+# White-patch condiviso con il Flusso B
+sys.path.append(str(Path(__file__).resolve().parents[1] / "Flow_B_Target"))
+from module4_denoise_colored import white_patch
+
 
 def get_default_artifacts_dir() -> Path:
     """Restituisce il percorso della cartella artifacts/Flow_A_Reference/module3_color."""
     pipeline_dir = Path(__file__).resolve().parents[2]
     return pipeline_dir / "artifacts" / "Flow_A_Reference" / "module3_color"
+
+
+def save_white_patch_references(ref_dir: Path, out_dir: Path) -> Path:
+    """Salva in out_dir una copia con white-patch di ogni immagine di riferimento e restituisce out_dir."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for path in sorted(ref_dir.glob("*.jpg")):
+        cv2.imwrite(str(out_dir / path.name), white_patch(cv2.imread(str(path))), [cv2.IMWRITE_JPEG_QUALITY, 100])
+    return out_dir
 
 
 def extract_and_save_color_profiles(
@@ -51,7 +65,8 @@ def extract_and_save_color_profiles(
     out_path.mkdir(parents=True, exist_ok=True)
 
     tau, tau_half_gap = bimetal_classifier.threshold_from_references(ref_dir)
-    hue_thr, hue_half_gap = singlemetal_classifier.threshold_from_references(ref_dir)
+    white_patch_ref_dir = save_white_patch_references(ref_dir, out_path / "white_patch_references")
+    hue_thr, hue_half_gap = singlemetal_classifier.threshold_from_references(white_patch_ref_dir)
 
     profiles = {
         "bimetal": {
@@ -66,7 +81,7 @@ def extract_and_save_color_profiles(
             "threshold": hue_thr,
             "half_gap": hue_half_gap,
             "confident": singlemetal_classifier.CONFIDENT,
-            "references": singlemetal_classifier.reference_hues(ref_dir)
+            "references": singlemetal_classifier.reference_hues(white_patch_ref_dir)
         }
     }
 

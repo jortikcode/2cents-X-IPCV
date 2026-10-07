@@ -5,7 +5,7 @@ Per ogni moneta rilevata dal Modulo 3 applica le stesse misure usate nel Flusso 
 del Flusso A (artifacts/Flow_A_Reference/module3_color/color_profiles.json):
 
 1. Delta b* (anello - centro) -> '1 euro', '2 euro' oppure monometallica.
-2. Solo per le monometalliche: Hue dopo white-patch sull'intera immagine -> 'copper' oppure 'gold'.
+2. Solo per le monometalliche: Hue sull'immagine dopo white-patch (Modulo 4) -> 'copper' oppure 'gold'.
 
 La confidence e' la distanza dalla soglia in unita' di 'half_gap': 1.0 significa che la moneta e'
 netta quanto la reference piu' vicina alla soglia. Sotto il cut-off 'confident' la decisione e' incerta.
@@ -68,7 +68,7 @@ def classify_coin_color(
 
     Args:
         img_bgr: Immagine target intera (BGR).
-        img_white_patch: La stessa immagine dopo white-patch (calcolato una volta per immagine).
+        img_white_patch: La stessa immagine dopo white-patch (Modulo 4).
         cx, cy, r: Cerchio della moneta rilevato dal Modulo 3.
         profiles: Soglie del Flusso A.
 
@@ -102,6 +102,7 @@ def classify_coin_color(
 
 def classify_all_coins(
     target_images: Dict[str, np.ndarray],
+    white_patch_images: Dict[str, np.ndarray],
     annotated_images: Dict[str, Any],
     profiles: Optional[Dict[str, Any]] = None,
     save_artifacts: bool = True
@@ -110,7 +111,9 @@ def classify_all_coins(
     Esegue la classificazione cromatica su tutte le monete di tutte le immagini target.
 
     Args:
-        target_images: Immagini target originali del Modulo 1 (non denoised, come le reference).
+        target_images: Immagini target BGR preparate da median_target_images del Modulo 4
+            (solo Median Filter, senza NLM).
+        white_patch_images: Le stesse immagini dopo white_patch_images del Modulo 4.
         annotated_images: Data structure del Modulo 3 con i cerchi rilevati.
         profiles: Soglie del Flusso A (se None vengono caricate dagli artifacts).
         save_artifacts: Se True aggiorna il manifest unificato 'annotated_images.json'.
@@ -126,9 +129,8 @@ def classify_all_coins(
     unsure = 0
 
     for img_name, entry in updated_annotated.items():
-        # Le immagini target hanno i canali R e B invertiti rispetto alle reference (come nel Modulo 4)
-        img_bgr = cv2.cvtColor(target_images[img_name], cv2.COLOR_RGB2BGR)
-        img_white_patch = singlemetal_classifier.white_patch(img_bgr)
+        img_bgr = target_images[img_name]
+        img_white_patch = white_patch_images[img_name]
 
         for coin in entry.get("coins", []):
             cx, cy = coin["center"]
@@ -181,7 +183,7 @@ def plot_classified_coins_sample(
     for ax, (img_name, coin) in zip(axes, sample):
         x, y, r = round(coin["center"][0]), round(coin["center"][1]), round(coin["radius"])
         crop = target_images[img_name][max(0, y - r):y + r, max(0, x - r):x + r]
-        ax.imshow(crop)  # canali R/B invertiti su disco: l'array e' gia' RGB per matplotlib
+        ax.imshow(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
         flag = "" if coin["confident"] else " (incerta)"
         ax.set_title(f"{img_name}_{coin.get('coin_id', 0)}: {coin['kind'].upper()}\nconfidence {coin['confidence']:.2f}{flag}",
                      fontsize=10, fontweight="bold")
