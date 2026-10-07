@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 import matplotlib.pyplot as plt
+import cv2
 
 from module1_load_references import get_default_ref_dir
 
