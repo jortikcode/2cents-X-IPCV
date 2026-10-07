@@ -1,31 +1,26 @@
-"""Modulo 7.2 (Flow B): Classificazione Monete Multiple (Invarianza di Scala Relativa e CSP).
+"""Modulo 7.2 (Flow B): Classificazione Monete Multiple (Soft-CSP Multi-Modale: Geometria, Colore e ZNCC).
 
-Questo modulo è dedicato alla classificazione delle immagini che contengono MONETE MULTIPLE (> 1 moneta).
-
-Logica della pipeline:
-1. Filtraggio:
-   - Isola le immagini con più di 1 moneta (len(coins) > 1).
-2. Generazione dello spazio combinatorio (Tuple di assegnazione):
-   - Per ciascuna moneta nell'immagine, i candidati possibili vengono ristretti in base
-     alla tipologia di colore ('kind') estratta dal Modulo 5:
-     * '1 euro' -> ['1euro']
-     * '2 euro' -> ['2euro']
-     * 'gold'   -> ['10cent', '20cent', '50cent']
-     * 'copper' -> ['1cent', '2cent', '5cent']
-   - Lo spazio combinatorio per ciascuna immagine è il prodotto cartesiano dei candidati (al più 3^X tuple).
-3. Pruning e Ottimizzazione basata su Raggi Relativi e Consistenza di Scala:
-   - Poiché tutte le monete della stessa immagine sono fotografate sullo stesso piano e alla stessa
-     distanza focale, il fattore di scala S = raggio_pixel / raggio_nominale_mm deve essere costante.
-   - Vincoli e penalità per ogni tupla:
-     * Vincolo di Monotonia: se r_i > r_j + tolleranza, allora D_i deve essere >= D_j.
-     * Consistenza del rapporto tra raggi: r_i / r_j deve concordare con il rapporto dei diametri fisici D_i / D_j.
-     * Coefficiente di variazione della scala: CV(S) = std(S) / mean(S) deve essere minimo.
-     * Somma delle confidence cromatiche estratte dal Modulo 5.
-   - Viene selezionata la tupla globale che massimizza lo score di consistenza fisica e cromatica.
-4. Output e Artefatti:
-   - Assegna il campo "class": "<taglio>" a ciascuna moneta nel manifest unificato 'annotated_images.json' (in artifacts/Flow_B_Target/annotated_images.json).
-   - Salva negli artifacts (artifacts/Flow_B_Target/module7_2_multi_coin_classification/):
-     * Immagine ROI etichettata '{nome_file}_{coin_id}.png' con il taglio classificato.
+Questo modulo è dedicato alla classificazione delle immagini che contengono MONETE MULTIPLE (> 1 moneta),
+integrando in un unico framework probabilistico:
+1. Invarianza di Scala Relativa e Coerenza Fisica (Hard/Dominant Constraint):
+   - Tutte le monete della stessa immagine condividono la stessa distanza fotocamera-piano.
+   - Il fattore di scala S = raggio_pixel / raggio_nominale_mm deve essere costante (minimizzazione di CV(S)).
+   - Vincolo di Monotonicità: se r_i > r_j + tolleranza, allora D_i deve essere >= D_j.
+2. Rilassamento Cromatico (Soft Pruning):
+   - Per monete con classificazione cromatica sicura ('confident' == True), lo spazio dei candidati
+     è ristretto al proprio gruppo ('1 euro', '2 euro', 'gold', 'copper').
+   - Per monete con confidenza cromatica bassa ('confident' == False, es. monete ossidate/sporche),
+     lo spazio dei candidati viene allargato al gruppo cromatico vicino (es. monometalliche sia gold che copper).
+   - Se una tupla seleziona una classe appartenente a un gruppo cromatico diverso da quello predetto,
+     subisce una penalità morbida pesata per la confidenza residua.
+3. Termine di Regolarizzazione ZNCC Dinamico (Bordi e Bassorilievi):
+   - Per ciascuna moneta e ciascun candidato, confronta la matrice polare target con la matrice
+     di riferimento del Flusso A tramite Circular ZNCC.
+   - Il peso del bonus ZNCC viene modulato dinamicamente:
+     * Aumenta se la moneta ha bassa confidenza di colore (aiuta a recuperare errori cromatici).
+     * Aumenta se la moneta ha raggio simile ad altre monete nella scena (risolve l'ambiguità di scala/tie-breaker).
+   - Il peso base ZNCC è calibrato per essere ridotto rispetto alle penalità geometriche, garantendo
+     che la consistenza fisica e la monotonicità non vengano mai violate.
 """
 
 import itertools
@@ -36,6 +31,32 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Import funzioni ZNCC e caricamento reference dal Modulo 7.1
+try:
+    from module7_1_single_coin_classification import (
+        load_reference_polar_matrices,
+        compute_circular_zncc,
+        get_default_reference_polar_dir
+    )
+except ImportError:
+    from pipeline.src.Flow_B_Target.module7_1_single_coin_classification import (
+        load_reference_polar_matrices,
+        compute_circular_zncc,
+        get_default_reference_polar_dir
+    )
+
+
+CLASS_TO_KIND: Dict[str, str] = {
+    "1cent": "copper",
+    "2cent": "copper",
+    "5cent": "copper",
+    "10cent": "gold",
+    "20cent": "gold",
+    "50cent": "gold",
+    "1euro": "1 euro",
+    "2euro": "2 euro"
+}
 
 
 def get_default_conf_dir() -> Path:
@@ -96,7 +117,13 @@ def load_or_create_multi_coin_params(json_path: Optional[Union[str, Path]] = Non
         "monotonicity_tolerance_px": 3.0,
         "weight_ratio_error": 10.0,
         "weight_scale_cv": 20.0,
-        "weight_monotonicity_violation": 50.0
+        "weight_monotonicity_violation": 50.0,
+        "use_soft_csp": True,
+        "weight_color_penalty": 3.0,
+        "weight_base_zncc": 1.5,
+        "alpha_color_uncertainty": 1.0,
+        "beta_dim_uncertainty": 1.0,
+        "radius_similarity_px": 4.0
     }
     json_path.parent.mkdir(parents=True, exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
@@ -105,28 +132,51 @@ def load_or_create_multi_coin_params(json_path: Optional[Union[str, Path]] = Non
     return params
 
 
+def load_coin_polar_matrix(coin: Dict[str, Any], img_name: Optional[str] = None) -> Optional[np.ndarray]:
+    """Carica la matrice polare (360x50) della moneta target."""
+    proj_root = Path(__file__).resolve().parents[3]
+    polar_path_str = coin.get("polar_unwarp_path", "")
+    if polar_path_str:
+        p = proj_root / polar_path_str
+        if p.exists():
+            try:
+                return np.load(str(p)).astype(np.float32)
+            except Exception:
+                pass
+
+    if img_name:
+        coin_id = coin.get("coin_id", 0)
+        p = Path(__file__).resolve().parents[2] / "artifacts" / "Flow_B_Target" / "module6_polar_unwarp" / f"{img_name}_{coin_id}_polar.npy"
+        if p.exists():
+            try:
+                return np.load(str(p)).astype(np.float32)
+            except Exception:
+                pass
+
+    return None
+
+
 def solve_multi_coin_assignment(
     coins: List[Dict[str, Any]],
-    params: Dict[str, Any]
+    params: Dict[str, Any],
+    reference_matrices: Optional[Dict[str, np.ndarray]] = None,
+    img_name: Optional[str] = None
 ) -> Tuple[List[str], float, Dict[str, Any]]:
     """
-    Risolve l'assegnazione ottima delle classi per le monete di una singola immagine.
+    Risolve l'assegnazione ottima delle classi per le monete di una singola immagine
+    tramite Soft-CSP Multi-Modale (Geometria + Colore Morbido + Polar ZNCC).
     
-    1. Genera tutte le tuple di assegnazione possibili pruned sul colore:
-       ogni moneta seleziona solo i candidati del proprio colore ('kind').
-    2. Per ciascuna tupla candidata:
-       - Calcola la stima della scala S_i = r_i / R_nominale_i (px/mm).
-       - Calcola la dispersione della scala CV(S) = std(S) / mean(S).
-       - Calcola l'errore medio dei rapporti a coppie tra raggi rilevati e raggi nominali.
-       - Conta le violazioni di monotonicità (moneta con raggio maggiore a cui è assegnato diametro minore).
-       - Calcola lo score combinato pesato.
-    3. Restituisce la tupla vincente con lo score massimo.
-    
-    Returns:
-        Tuple[List[str], float, Dict[str, Any]]:
-            - best_tuple: lista ordinata delle classi predette [c0, c1, ...]
-            - best_score: punteggio globale dell'assegnazione
-            - details: statistiche su scala stimata, errore medio e violazioni
+    1. Soft Pruning dei Candidati:
+       - Se la moneta ha confidenza cromatica sicura ('confident' == True),
+         usa il set ristretto del gruppo colore ('kind').
+       - Se la moneta ha colore incerto ('confident' == False), allarga lo spazio
+         dei candidati ai gruppi vicini (es. monometalliche copper + gold).
+    2. Valutazione Combinatoria Multi-Modale:
+       - Termine Geometrico: dispersione della scala CV(S), errore rapporti e violazioni di monotonicità.
+       - Termine Cromatico: penalità per deviazioni dal gruppo colore predetto pesata sulla confidenza.
+       - Termine ZNCC: bonus pesato dinamicamente, più influente in presenza di incertezza di colore
+         o di raggi dimensionalmente vicini (tie-breaker).
+    3. Restituisce la tupla vincente con lo score massimo e i dettagli completi.
     """
     diameters = params.get("diameters_mm", {})
     kind_to_candidates = params.get("kind_to_candidates", {})
@@ -135,34 +185,102 @@ def solve_multi_coin_assignment(
     w_cv = float(params.get("weight_scale_cv", 20.0))
     w_viol = float(params.get("weight_monotonicity_violation", 50.0))
 
-    # Candidati per ciascuna moneta in base al colore
+    # Parametri Soft-CSP e ZNCC
+    use_soft_csp = bool(params.get("use_soft_csp", True))
+    w_color_pen = float(params.get("weight_color_penalty", 3.0))
+    w_base_zncc = float(params.get("weight_base_zncc", 1.5))
+    alpha_color = float(params.get("alpha_color_uncertainty", 1.0))
+    beta_dim = float(params.get("beta_dim_uncertainty", 1.0))
+    rad_sim_px = float(params.get("radius_similarity_px", 4.0))
+
+    n_coins = len(coins)
+    radii = [float(c["radius"]) for c in coins]
+
+    # 1. Candidati per ciascuna moneta
     candidates_per_coin = []
     for c in coins:
         knd = c.get("kind", "gold")
-        cands = kind_to_candidates.get(knd, ["10cent", "20cent", "50cent"])
+        confident = bool(c.get("confident", True))
+
+        if use_soft_csp and not confident:
+            # Espansione dei candidati per monete con colore incerto:
+            if knd in ["gold", "copper"]:
+                # Monometallica incerta: ammette sia rame che oro
+                cands = ["1cent", "2cent", "5cent", "10cent", "20cent", "50cent"]
+            elif knd in ["1 euro", "2 euro"]:
+                # Bimetallica incerta: ammette entrambi i tagli bimetallici
+                cands = ["1euro", "2euro"]
+            else:
+                cands = kind_to_candidates.get(knd, ["10cent", "20cent", "50cent"])
+        else:
+            cands = kind_to_candidates.get(knd, ["10cent", "20cent", "50cent"])
+
         candidates_per_coin.append(cands)
+
+    # Safety check sullo spazio combinatorio: se il numero di tuple supera 50.000,
+    # mantiene l'espansione solo sulle 2 monete con confidenza più bassa
+    num_tuples_est = int(np.prod([len(c) for c in candidates_per_coin]))
+    if num_tuples_est > 50000:
+        confs_list = [(i, float(coins[i].get("confidence", 0.70))) for i in range(n_coins)]
+        confs_list.sort(key=lambda x: x[1])
+        unconstrained_indices = {confs_list[0][0], confs_list[1][0]}
+        for i in range(n_coins):
+            if i not in unconstrained_indices:
+                knd = coins[i].get("kind", "gold")
+                candidates_per_coin[i] = kind_to_candidates.get(knd, ["10cent", "20cent", "50cent"])
 
     all_tuples = list(itertools.product(*candidates_per_coin))
 
+    # 2. Incertezza dimensionale (monete con raggio molto vicino ad altre monete nella scena)
+    dim_uncertainty = []
+    for i in range(n_coins):
+        is_close = any(abs(radii[i] - radii[j]) <= rad_sim_px for j in range(n_coins) if j != i)
+        dim_uncertainty.append(1.0 if is_close else 0.0)
+
+    # 3. Precalcolo ZNCC per ciascuna moneta e ciascun candidato
+    zncc_scores_per_coin: List[Dict[str, float]] = []
+    for i in range(n_coins):
+        coin_zncc: Dict[str, float] = {}
+        target_polar = load_coin_polar_matrix(coins[i], img_name=img_name) if (use_soft_csp and reference_matrices) else None
+
+        for cand in candidates_per_coin[i]:
+            if target_polar is not None and reference_matrices and cand in reference_matrices:
+                try:
+                    score, _ = compute_circular_zncc(target_polar, reference_matrices[cand])
+                    coin_zncc[cand] = float(score)
+                except Exception:
+                    coin_zncc[cand] = 0.0
+            else:
+                coin_zncc[cand] = 0.0
+        zncc_scores_per_coin.append(coin_zncc)
+
+    # 4. Pesi dinamici ZNCC per moneta:
+    # Aumentano se il colore è incerto (1 - conf) e/o se i raggi sono simili ad altre monete
+    zncc_weights = []
+    for i in range(n_coins):
+        if use_soft_csp:
+            conf_i = min(float(coins[i].get("confidence", 0.70)), 1.0)
+            color_unc = max(0.0, 1.0 - conf_i)
+            w_i = w_base_zncc * (1.0 + alpha_color * color_unc + beta_dim * dim_uncertainty[i])
+        else:
+            w_i = 0.0
+        zncc_weights.append(w_i)
+
+    # 5. Valutazione di tutte le tuple candidate
     best_tuple = None
     best_score = -1e9
     best_details = {}
 
-    radii = [float(c["radius"]) for c in coins]
-    confs = [float(c.get("confidence", 0.70)) for c in coins]
-    n_coins = len(coins)
-
     for tup in all_tuples:
-        # 1. Stima del fattore di scala per ogni moneta [px/mm]
+        # 5.1 Stima scala px/mm
         scales = [radii[i] / (diameters[tup[i]] / 2.0) for i in range(n_coins)]
         mean_scale = float(np.mean(scales))
         std_scale = float(np.std(scales))
         scale_cv = float(std_scale / (mean_scale + 1e-5))
 
-        # 2. Errore dei rapporti a coppie e violazioni di monotonicità
+        # 5.2 Rapporti a coppie e monotonicità
         ratio_errors = []
         violations = 0
-
         for i in range(n_coins):
             for j in range(i + 1, n_coins):
                 r_ratio = radii[i] / max(radii[j], 1e-5)
@@ -170,27 +288,54 @@ def solve_multi_coin_assignment(
                 rel_err = abs(r_ratio - d_ratio) / d_ratio
                 ratio_errors.append(rel_err)
 
-                # Monotonicità: se r_i è significativamente maggiore di r_j, D_i deve essere >= D_j
+                # Violazione di monotonicità
                 if radii[i] > radii[j] + mono_tol and diameters[tup[i]] < diameters[tup[j]]:
                     violations += 1
                 elif radii[j] > radii[i] + mono_tol and diameters[tup[j]] < diameters[tup[i]]:
                     violations += 1
 
         mean_ratio_err = float(np.mean(ratio_errors)) if ratio_errors else 0.0
+        geom_score = - (w_ratio * mean_ratio_err) - (w_cv * scale_cv) - (w_viol * violations)
 
-        # 3. Score complessivo della tupla
-        conf_sum = sum(confs)
-        score = conf_sum - (w_ratio * mean_ratio_err) - (w_cv * scale_cv) - (w_viol * violations)
+        # 5.3 Penalità Colore (solo per assegnazioni a gruppo diverso da quello osservato)
+        color_penalties = []
+        for i in range(n_coins):
+            pred_kind = coins[i].get("kind", "gold")
+            cand_kind = CLASS_TO_KIND.get(tup[i], pred_kind)
+            if cand_kind != pred_kind:
+                conf_i = min(float(coins[i].get("confidence", 0.70)), 1.0)
+                pen = w_color_pen * conf_i
+                color_penalties.append(pen)
+            else:
+                color_penalties.append(0.0)
+        total_color_pen = sum(color_penalties) if use_soft_csp else 0.0
 
-        if score > best_score:
-            best_score = score
+        # 5.4 Bonus ZNCC
+        zncc_bonuses = []
+        for i in range(n_coins):
+            z_score = zncc_scores_per_coin[i].get(tup[i], 0.0)
+            z_val = max(0.0, z_score)
+            zncc_bonuses.append(zncc_weights[i] * z_val)
+        total_zncc_bonus = sum(zncc_bonuses) if use_soft_csp else 0.0
+
+        # Score totale combinato
+        total_score = geom_score - total_color_pen + total_zncc_bonus
+
+        if total_score > best_score:
+            best_score = total_score
             best_tuple = tup
             best_details = {
                 "mean_scale_px_per_mm": round(mean_scale, 2),
                 "scale_cv_pct": round(scale_cv * 100, 2),
                 "mean_ratio_error_pct": round(mean_ratio_err * 100, 2),
                 "monotonicity_violations": violations,
-                "scales_per_coin": [round(s, 2) for s in scales]
+                "geom_score": round(geom_score, 3),
+                "color_penalty": round(total_color_pen, 3),
+                "zncc_bonus": round(total_zncc_bonus, 3),
+                "total_score": round(total_score, 3),
+                "scales_per_coin": [round(s, 2) for s in scales],
+                "zncc_per_coin": [round(zncc_scores_per_coin[i].get(tup[i], 0.0), 3) for i in range(n_coins)],
+                "zncc_scores_all": zncc_scores_per_coin
             }
 
     if best_tuple is None and all_tuples:
@@ -203,12 +348,13 @@ def create_labeled_denomination_image(
     roi_bgr: np.ndarray,
     predicted_class: str,
     scale_val: float = 0.0,
+    zncc_score: Optional[float] = None,
     canvas_size: int = 250
 ) -> np.ndarray:
     """
     Crea l'immagine della ROI con banner in sovraimpressione che indica
-    la classe finale ('class') per le monete multiple.
-    Es: '50CENT', '2CENT', '1EURO'.
+    la classe finale ('class') e lo score ZNCC (se disponibile).
+    Es: '50CENT (0.35)', '2CENT', '1EURO (0.91)'.
     """
     labeled = roi_bgr.copy()
 
@@ -233,10 +379,15 @@ def create_labeled_denomination_image(
     # Bordo inferiore sottile al banner
     cv2.line(labeled, (0, 34), (canvas_size, 34), (80, 80, 80), 1)
 
-    # Testo con la classe predetta
-    label_text = predicted_class.upper()
+    # Testo con la classe predetta ed eventuale score ZNCC
+    if zncc_score is not None and zncc_score > 0:
+        label_text = f"{predicted_class.upper()} ({zncc_score:.2f})"
+        font_scale = 0.58
+    else:
+        label_text = predicted_class.upper()
+        font_scale = 0.65
+
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.65
     thickness = 2
     (tw, th), _ = cv2.getTextSize(label_text, font, font_scale, thickness)
     tx = max(8, (canvas_size - tw) // 2)
@@ -317,18 +468,20 @@ def load_target_image(
 
 def classify_multi_coin_images(
     annotated_images: Dict[str, Any],
+    reference_matrices: Optional[Dict[str, np.ndarray]] = None,
     denoised_images: Optional[Dict[str, np.ndarray]] = None,
     params: Optional[Dict[str, Any]] = None,
     output_dir: Optional[Union[str, Path]] = None,
     save_artifacts: bool = True
 ) -> Tuple[Dict[str, Any], Dict[str, np.ndarray]]:
     """
-    Esegue la classificazione per tutte le immagini che contengono MONETE MULTIPLE (len(coins) > 1):
+    Esegue la classificazione per tutte le immagini che contengono MONETE MULTIPLE (len(coins) > 1)
+    tramite Soft-CSP Multi-Modale (Invarianza di Scala Relativa, Colore Morbido e Polar ZNCC):
     1. Per ciascuna immagine con monete multiple:
-       - Risolve l'assegnazione ottima delle classi tramite consistenza di scala relativa (CSP).
-       - Assegna il campo 'class' a ogni moneta dell'immagine.
+       - Risolve l'assegnazione ottima delle classi tramite Soft-CSP multi-modale.
+       - Assegna il campo 'class', 'polar_zncc_score' e metadati a ogni moneta dell'immagine.
        - Salva le ROI etichettate ({nome_file}_{coin_id}.png) negli artifacts.
-    2. Aggiorna in append 'annotated_images.json' e salva 'multi_coin_classified_manifest.json'.
+    2. Aggiorna in append 'annotated_images.json'.
     
     Returns:
         Tuple[Dict[str, Any], Dict[str, np.ndarray]]:
@@ -337,6 +490,13 @@ def classify_multi_coin_images(
     """
     if params is None:
         params = load_or_create_multi_coin_params()
+
+    if reference_matrices is None and params.get("use_soft_csp", True):
+        try:
+            reference_matrices = load_reference_polar_matrices()
+        except Exception as e:
+            print(f"[Warning] Impossibile caricare reference polar matrices: {e}")
+            reference_matrices = None
 
     if output_dir is not None:
         out_path = Path(output_dir)
@@ -357,7 +517,8 @@ def classify_multi_coin_images(
     multi_coin_images = [img for img, data in updated_annotated.items() if len(data.get("coins", [])) > 1]
     total_multi_coins = sum(len(updated_annotated[img]["coins"]) for img in multi_coin_images)
 
-    print(f"\n--- Modulo 7.2: Classificazione Monete Multiple ---")
+    mode_label = "Soft-CSP Multi-Modale (Geometria + Colore + ZNCC)" if params.get("use_soft_csp", True) else "Hard-CSP Geometrico"
+    print(f"\n--- Modulo 7.2: Classificazione Monete Multiple [{mode_label}] ---")
     print(f"  - Immagini con monete multiple: {len(multi_coin_images)}")
     print(f"  - Totale monete da classificare: {total_multi_coins}")
 
@@ -371,8 +532,13 @@ def classify_multi_coin_images(
         # Carica l'immagine target sorgente pulita (denoised)
         full_img = load_target_image(img_name, denoised_images=denoised_images, image_cache=image_cache)
 
-        # 1. Risoluzione dell'assegnazione ottimale
-        best_classes, score, details = solve_multi_coin_assignment(coins_list, params)
+        # 1. Risoluzione dell'assegnazione ottimale Soft-CSP
+        best_classes, score, details = solve_multi_coin_assignment(
+            coins=coins_list,
+            params=params,
+            reference_matrices=reference_matrices,
+            img_name=img_name
+        )
 
         # 2. Assegnazione delle classi e salvataggio metadati
         for idx, coin in enumerate(coins_list):
@@ -380,16 +546,19 @@ def classify_multi_coin_images(
             coin_key = f"{img_name}_{coin_id}"
             assigned_class = best_classes[idx]
             scale_val = details.get("scales_per_coin", [0.0] * len(coins_list))[idx]
+            zncc_val = details.get("zncc_per_coin", [0.0] * len(coins_list))[idx]
 
             coin["class"] = assigned_class
-            coin["classification_method"] = "multi_coin_relative_scale"
+            coin["classification_method"] = "multi_coin_soft_csp_zncc" if params.get("use_soft_csp", True) else "multi_coin_relative_scale"
             coin["estimated_scale_px_per_mm"] = scale_val
             coin["assignment_score"] = round(score, 3)
+            coin["polar_zncc_score"] = zncc_val
+            if "zncc_scores_all" in details and idx < len(details["zncc_scores_all"]):
+                coin["polar_matching_scores"] = {c: round(s, 4) for c, s in details["zncc_scores_all"][idx].items()}
 
             class_counts[assigned_class] = class_counts.get(assigned_class, 0) + 1
 
             # 3. Creazione e salvataggio ROI etichettata pulita
-            # Estrae la ROI pulita direttamente dall'immagine sorgente denoised (evitando scritte pregresse)
             if full_img is not None:
                 cx, cy = float(coin["center"][0]), float(coin["center"][1])
                 radius = float(coin["radius"])
@@ -397,7 +566,13 @@ def classify_multi_coin_images(
             else:
                 base_roi = np.zeros((250, 250, 3), dtype=np.uint8)
 
-            labeled_roi = create_labeled_denomination_image(base_roi, assigned_class, scale_val=scale_val, canvas_size=250)
+            labeled_roi = create_labeled_denomination_image(
+                base_roi,
+                assigned_class,
+                scale_val=scale_val,
+                zncc_score=zncc_val,
+                canvas_size=250
+            )
             labeled_multi_rois[coin_key] = labeled_roi
 
             if save_artifacts:
@@ -429,7 +604,8 @@ def plot_multi_coin_classification_sample(
     labeled_rois: Dict[str, np.ndarray],
     n_samples: int = 8,
     seed: Optional[int] = None,
-    figsize: tuple = (16, 8)
+    figsize: tuple = (16, 8),
+    show_plot: bool = True
 ):
     """
     Mostra a schermo una griglia di campioni di monete multiple classificate,
@@ -464,7 +640,8 @@ def plot_multi_coin_classification_sample(
 
     plt.suptitle(f"Modulo 7.2: Campione Monete Multiple Classificate ({len(sample_keys)} monete)", fontsize=14, y=0.98)
     plt.tight_layout()
-    plt.show()
+    if show_plot:
+        plt.show()
     plt.close(fig)
 
 

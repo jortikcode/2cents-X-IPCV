@@ -30,5 +30,11 @@
   "monotonicity_tolerance_px": 3.0,
   "weight_ratio_error": 10.0,
   "weight_scale_cv": 20.0,
-  "weight_monotonicity_violation": 50.0
+  "weight_monotonicity_violation": 50.0,
+  "use_soft_csp": true,
+  "weight_color_penalty": 3.0,
+  "weight_base_zncc": 1.5,
+  "alpha_color_uncertainty": 1.0,
+  "beta_dim_uncertainty": 1.0,
+  "radius_similarity_px": 4.0
 }
