@@ -41,11 +41,8 @@ def ring_minus_centre(image: np.ndarray, cx: float, cy: float, r: float) -> floa
     return float(yellow[ring].mean() - yellow[centre].mean())
 
 
-def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
-    """Threshold halfway between the single-metal and the bimetal reference coins.
-
-    Returns the threshold and half the gap between those two coins, which is the
-    unit `confidence` is measured in.
+def reference_deltas(reference_dir: Path) -> dict[str, float]:
+    """Ring-minus-centre yellowness of every reference coin, by denomination.
 
     Expects one coin per image, named after its denomination (1euro.jpg, 2cent.jpg, ...).
     """
@@ -59,7 +56,16 @@ def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
             raise ValueError(f"no coin detected in reference {path.name}")
         coin = max(kept or circles, key=lambda c: c.radius)
         deltas[path.stem] = ring_minus_centre(image, coin.cx, coin.cy, coin.radius)
+    return deltas
 
+
+def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
+    """Threshold halfway between the single-metal and the bimetal reference coins.
+
+    Returns the threshold and half the gap between those two coins, which is the
+    unit `confidence` is measured in.
+    """
+    deltas = reference_deltas(reference_dir)
     largest_single = max(
         abs(d) for name, d in deltas.items() if name not in BIMETAL_REFERENCES
     )
@@ -68,11 +74,12 @@ def threshold_from_references(reference_dir: Path) -> tuple[float, float]:
 
 
 def confidence(delta: float, threshold: float, half_gap: float) -> float:
-    """Distance from the threshold, in units of the distance to the nearest reference.
+    """Distance from the threshold, in units of the distance to the nearest reference, capped at 1.
 
-    1.0 means the coin is as clear-cut as the nearest reference coin was.
+    0 means the coin is on the threshold; 1 means it is at least as clear-cut
+    as the nearest reference coin was.
     """
-    return abs(abs(delta) - threshold) / half_gap
+    return min(abs(abs(delta) - threshold) / half_gap, 1.0)
 
 
 def classify(delta: float, threshold: float) -> str:
